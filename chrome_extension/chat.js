@@ -7,55 +7,298 @@ document.addEventListener('DOMContentLoaded', async () => {
     const clearChatButton = document.getElementById('clearChatButton');
     const modelSwitcherButton = document.getElementById('modelSwitcherButton');
     const modelSwitcherDropdown = document.getElementById('modelSwitcherDropdown');
+    const conversationSidebar = document.getElementById('conversationSidebar');
+    const newChatButton = document.getElementById('newChatButton');
+    const collapseSidebarButton = document.getElementById('collapseSidebarButton');
+    const conversationList = document.getElementById('conversationList');
 
-    let modelName = '';
-    let conversationHistory = []; // To store messages for context
+    let currentModelName = '';
     const storageKeyPrefix = 'ollamaBroChat_';
+    const sidebarStateKey = 'ollamaBroSidebarState';
+    let availableModels = [];
 
-    // --- Storage Helper Functions ---
-    function getStorageKey(currentModelName) {
-        return `${storageKeyPrefix}${currentModelName.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+    function getModelStorageKey(model) {
+        return `${storageKeyPrefix}${model.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
     }
 
-    async function saveChatHistory(currentModelName, history) {
+    async function loadModelChatState(modelToLoad) {
         if (!chrome.storage || !chrome.storage.local) {
-            console.warn('Chrome storage API not available. Chat history will not be saved.');
+            console.warn('Chrome storage API not available.');
+            return { conversations: {}, activeConversationId: null };
+        }
+        try {
+            const key = getModelStorageKey(modelToLoad);
+            const data = await chrome.storage.local.get(key);
+            if (data && data[key]) {
+                console.log(`Chat state loaded for ${modelToLoad}`);
+                return data[key]; // Should contain { conversations: {...}, activeConversationId: '...' }
+            }
+            return { conversations: {}, activeConversationId: null }; // Default if nothing stored
+        } catch (error) {
+            console.error('Error loading chat state:', error);
+            return { conversations: {}, activeConversationId: null };
+        }
+    }
+
+    async function saveModelChatState(modelToSave, modelData) {
+        if (!chrome.storage || !chrome.storage.local) {
+            console.warn('Chrome storage API not available.');
             return;
         }
         try {
-            const key = getStorageKey(currentModelName);
-            await chrome.storage.local.set({ [key]: { conversationHistory: history, timestamp: new Date().toISOString() } });
-            console.log(`Chat history saved for ${currentModelName}`);
+            const key = getModelStorageKey(modelToSave);
+            await chrome.storage.local.set({ [key]: modelData });
+            console.log(`Chat state saved for ${modelToSave}`);
         } catch (error) {
-            console.error('Error saving chat history:', error);
+            console.error('Error saving chat state:', error);
         }
     }
 
-    async function loadChatHistory(currentModelName) {
-        if (!chrome.storage || !chrome.storage.local) {
-            console.warn('Chrome storage API not available. Chat history will not be loaded.');
-            return false;
+    function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    function getConversationSummary(messages) {
+        if (!messages || messages.length === 0) return 'New Chat';
+        const firstUserMessage = messages.find(msg => msg.role === 'user');
+        return firstUserMessage ? firstUserMessage.content.substring(0, 40) : 'Chat'; // Max 40 chars for summary
+    }
+
+    function addMessageToChatUI(sender, text, messageClass) {
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message', messageClass);
+        const senderDiv = document.createElement('div');
+        senderDiv.classList.add('message-sender');
+        senderDiv.textContent = sender;
+        const textDiv = document.createElement('div');
+        textDiv.textContent = text;
+        messageDiv.appendChild(senderDiv);
+        messageDiv.appendChild(textDiv);
+        chatContainer.appendChild(messageDiv);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function displayConversationMessages(modelData, conversationId) {
+        chatContainer.innerHTML = ''; // Clear current messages
+        if (modelData.conversations[conversationId] && modelData.conversations[conversationId].messages) {
+            modelData.conversations[conversationId].messages.forEach(msg => {
+                addMessageToChatUI(msg.role === 'user' ? 'You' : currentModelName, msg.content, msg.role === 'user' ? 'user-message' : 'bot-message');
+            });
+        } else {
+             addMessageToChatUI(currentModelName, `Hello! Start a new conversation with ${decodeURIComponent(currentModelName)}.`, 'bot-message');
         }
+    }
+
+    async function startNewConversation(modelForNewChat = currentModelName) {
+        console.log(`Starting new conversation for model: ${modelForNewChat}`);
+        let modelData = await loadModelChatState(modelForNewChat);
+        const newConversationId = generateUUID();
+        modelData.conversations[newConversationId] = {
+            id: newConversationId,
+            messages: [],
+            summary: 'New Chat',
+            lastMessageTime: Date.now()
+        };
+        modelData.activeConversationId = newConversationId;
+        await saveModelChatState(modelForNewChat, modelData);
+        displayConversationMessages(modelData, newConversationId);
+        populateConversationSidebar(modelForNewChat, modelData);
+        messageInput.focus();
+        return newConversationId;
+    }
+
+    async function switchActiveConversation(modelToSwitch, newConversationId) {
+        console.log(`Switching to conversation ${newConversationId} for model ${modelToSwitch}`);
+        let modelData = await loadModelChatState(modelToSwitch);
+        if (modelData.conversations[newConversationId]) {
+            modelData.activeConversationId = newConversationId;
+            await saveModelChatState(modelToSwitch, modelData);
+            displayConversationMessages(modelData, newConversationId);
+            populateConversationSidebar(modelToSwitch, modelData); // Refresh sidebar to highlight active
+        } else {
+            console.warn(`Conversation ${newConversationId} not found for model ${modelToSwitch}. Starting new one.`);
+            await startNewConversation(modelToSwitch);
+        }
+        messageInput.focus();
+    }
+
+    async function handleDeleteConversation(modelOfConversation, conversationIdToDelete) {
+        if (!confirm('Are you sure you want to delete this conversation? This action cannot be undone.')) {
+            return;
+        }
+        console.log(`Deleting conversation ${conversationIdToDelete} for model ${modelOfConversation}`);
+        let modelData = await loadModelChatState(modelOfConversation);
+        if (modelData.conversations[conversationIdToDelete]) {
+            delete modelData.conversations[conversationIdToDelete];
+            if (modelData.activeConversationId === conversationIdToDelete) {
+                modelData.activeConversationId = null;
+                const remainingConvIds = Object.keys(modelData.conversations);
+                if (remainingConvIds.length > 0) {
+                    // Switch to the most recent remaining conversation
+                    const sortedRemaining = remainingConvIds.map(id => modelData.conversations[id])
+                                                      .sort((a, b) => b.lastMessageTime - a.lastMessageTime);
+                    modelData.activeConversationId = sortedRemaining[0].id;
+                    await saveModelChatState(modelOfConversation, modelData);
+                    switchActiveConversation(modelOfConversation, modelData.activeConversationId);
+                } else {
+                    await saveModelChatState(modelOfConversation, modelData); // Save cleared activeId
+                    await startNewConversation(modelOfConversation); // No convs left, start a new one
+                }
+            } else {
+                await saveModelChatState(modelOfConversation, modelData);
+                populateConversationSidebar(modelOfConversation, modelData); // Just refresh sidebar if deleted conv wasn't active
+            }
+        } else {
+            console.warn(`Conversation ${conversationIdToDelete} not found for deletion.`);
+        }
+    }
+
+    function populateConversationSidebar(modelForSidebar, modelData) {
+        conversationList.innerHTML = ''; // Clear existing items
+        if (!modelData || !modelData.conversations) return;
+
+        const sortedConversations = Object.values(modelData.conversations)
+            .sort((a, b) => b.lastMessageTime - a.lastMessageTime); // Newest first
+
+        sortedConversations.forEach(conv => {
+            const item = document.createElement('div');
+            item.classList.add('conversation-item');
+            item.dataset.conversationId = conv.id;
+            if (conv.id === modelData.activeConversationId) {
+                item.classList.add('active');
+            }
+
+            const titleSpan = document.createElement('span');
+            titleSpan.classList.add('conversation-item-title');
+            titleSpan.textContent = conv.summary || 'Chat';
+            titleSpan.title = conv.summary || 'Chat'; // Tooltip for full title
+
+            const deleteButton = document.createElement('button');
+            deleteButton.classList.add('delete-conversation-button');
+            deleteButton.innerHTML = '&#x1F5D1;'; // Trash can icon
+            deleteButton.title = 'Delete chat';
+            deleteButton.dataset.conversationId = conv.id;
+
+            item.appendChild(titleSpan);
+            item.appendChild(deleteButton);
+            conversationList.appendChild(item);
+
+            item.addEventListener('click', (e) => {
+                if (e.target === deleteButton || deleteButton.contains(e.target)) return; // Don't switch if delete is clicked
+                switchActiveConversation(modelForSidebar, conv.id);
+            });
+            deleteButton.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent item click event
+                handleDeleteConversation(modelForSidebar, conv.id);
+            });
+        });
+    }
+
+    async function sendMessageToOllama(prompt) {
+        if (!prompt.trim()) return;
+
+        let modelData = await loadModelChatState(currentModelName);
+        if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
+            console.warn('No active conversation found, starting a new one.');
+            await startNewConversation(currentModelName);
+            modelData = await loadModelChatState(currentModelName); // Reload modelData after new conv
+        }
+        const activeConvId = modelData.activeConversationId;
+        const currentConversation = modelData.conversations[activeConvId];
+
+        addMessageToChatUI('You', prompt, 'user-message');
+        messageInput.value = '';
+        loadingIndicator.style.display = 'block';
+        sendButton.disabled = true;
+        messageInput.disabled = true;
+
+        currentConversation.messages.push({ role: 'user', content: prompt });
+        currentConversation.lastMessageTime = Date.now();
+        if (currentConversation.messages.length === 1 && prompt) { // First user message
+            currentConversation.summary = getConversationSummary(currentConversation.messages);
+        }
+
+        await saveModelChatState(currentModelName, modelData);
+        populateConversationSidebar(currentModelName, modelData); // Update sidebar with new summary/time
+
+        const proxyUrl = 'http://localhost:3000/proxy/api/chat';
         try {
-            const key = getStorageKey(currentModelName);
-            const data = await chrome.storage.local.get(key);
-            if (data && data[key] && data[key].conversationHistory) {
-                conversationHistory = data[key].conversationHistory;
-                conversationHistory.forEach(msg => {
-                    addMessageToChat(msg.role === 'user' ? 'You' : currentModelName, msg.content, msg.role === 'user' ? 'user-message' : 'bot-message');
-                });
-                console.log(`Chat history loaded for ${currentModelName}`);
-                return true;
+            const response = await fetch(proxyUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: currentModelName,
+                    messages: currentConversation.messages.map(m => ({ role: m.role, content: m.content })), // Ensure only role/content sent
+                    stream: false
+                }),
+            });
+
+            loadingIndicator.style.display = 'none';
+            sendButton.disabled = false;
+            messageInput.disabled = false;
+            messageInput.focus();
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                console.error('Ollama API error:', response.status, errorBody);
+                addMessageToChatUI(currentModelName, `Error: ${response.status} - ${errorBody}`, 'bot-message');
+                return;
+            }
+
+            const data = await response.json();
+            if (data.message && data.message.content) {
+                const botReply = data.message.content;
+                addMessageToChatUI(currentModelName, botReply, 'bot-message');
+                currentConversation.messages.push({ role: 'assistant', content: botReply });
+                currentConversation.lastMessageTime = Date.now();
+                await saveModelChatState(currentModelName, modelData);
+                populateConversationSidebar(currentModelName, modelData); // Update sidebar again if summary changed by bot (though unlikely here)
+            } else {
+                addMessageToChatUI(currentModelName, 'Received an empty or unexpected response from the model.', 'bot-message');
             }
         } catch (error) {
-            console.error('Error loading chat history:', error);
+            console.error('Error sending message to Ollama:', error);
+            addMessageToChatUI(currentModelName, `Network or application error: ${error.message}`, 'bot-message');
+            loadingIndicator.style.display = 'none';
+            sendButton.disabled = false;
+            messageInput.disabled = false;
+            messageInput.focus();
         }
-        return false;
     }
 
-    // --- Model Switcher Functions ---
+    async function clearAllConversationsForModel(modelToClear) {
+        if (!confirm(`Are you sure you want to clear ALL chat history for ${decodeURIComponent(modelToClear)}? This action cannot be undone.`)) {
+            return;
+        }
+        console.log(`Clearing all conversations for model: ${modelToClear}`);
+        let modelData = { conversations: {}, activeConversationId: null };
+        await saveModelChatState(modelToClear, modelData);
+        await startNewConversation(modelToClear); // This will also update UI and sidebar
+    }
+
+    async function switchModel(newModelName) {
+        if (newModelName === currentModelName) return;
+        console.log(`Switching model to: ${newModelName}`);
+        currentModelName = newModelName;
+        modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(currentModelName)}`;
+        
+        let modelData = await loadModelChatState(currentModelName);
+        if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
+            await startNewConversation(currentModelName); // Start new if no active or no convs
+        } else {
+            displayConversationMessages(modelData, modelData.activeConversationId);
+            populateConversationSidebar(currentModelName, modelData);
+        }
+        messageInput.disabled = false;
+        sendButton.disabled = false;
+        messageInput.focus();
+    }
+
     async function fetchAvailableModels() {
-        if (availableModels.length > 0) return availableModels; // Return cached if already fetched
+        if (availableModels.length > 0) return availableModels;
         const proxyUrl = 'http://localhost:3000/proxy/api/tags';
         try {
             const response = await fetch(proxyUrl);
@@ -65,7 +308,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             const data = await response.json();
             availableModels = data.models ? data.models.map(m => m.name) : [];
-            console.log('Available models fetched:', availableModels);
             return availableModels;
         } catch (error) {
             console.error('Error fetching available models:', error);
@@ -74,239 +316,97 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function populateModelDropdown(models) {
-        modelSwitcherDropdown.innerHTML = ''; // Clear previous items
+        modelSwitcherDropdown.innerHTML = '';
         if (models.length === 0) {
             const noModelsItem = document.createElement('div');
-            noModelsItem.textContent = 'No models found or error fetching.';
+            noModelsItem.textContent = 'No models found.';
             noModelsItem.classList.add('model-dropdown-item');
-            noModelsItem.style.fontStyle = 'italic';
-            noModelsItem.style.color = '#777';
             modelSwitcherDropdown.appendChild(noModelsItem);
             return;
         }
         models.forEach(mName => {
-            const item = document.createElement('a'); // Use <a> for semantics, styled as block
-            item.href = '#'; // Prevent page jump
+            const item = document.createElement('a');
+            item.href = '#';
             item.classList.add('model-dropdown-item');
             item.textContent = mName;
             item.dataset.modelName = mName;
             item.addEventListener('click', async (e) => {
                 e.preventDefault();
                 await switchModel(mName);
-                modelSwitcherDropdown.style.display = 'none'; // Hide dropdown after selection
+                modelSwitcherDropdown.style.display = 'none';
             });
             modelSwitcherDropdown.appendChild(item);
         });
     }
 
-    async function switchModel(newModelName) {
-        if (newModelName === modelName) return; // No change
-
-        console.log(`Switching model to: ${newModelName}`);
-        modelName = newModelName;
-        modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(modelName)}`;
-        conversationHistory = []; // Reset history for the new model context
-
-        // Clear UI
-        while (chatContainer.firstChild) {
-            chatContainer.removeChild(chatContainer.firstChild);
+    async function init() {
+        const urlModel = new URLSearchParams(window.location.search).get('model');
+        if (!urlModel) {
+            modelNameDisplay.textContent = 'Error: Model name not specified.';
+            addMessageToChatUI('System', 'No model specified. Select a model.', 'bot-message');
+            messageInput.disabled = true; sendButton.disabled = true;
+            return;
         }
+        currentModelName = urlModel;
+        modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(currentModelName)}`;
 
-        // Load history for the new model or show greeting
-        const historyLoaded = await loadChatHistory(modelName);
-        if (!historyLoaded) {
-            addMessageToChat(modelName, `Hello! Ask me anything. (Model: ${decodeURIComponent(modelName)})`, 'bot-message');
+        let modelData = await loadModelChatState(currentModelName);
+        if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
+            await startNewConversation(currentModelName);
+        } else {
+            displayConversationMessages(modelData, modelData.activeConversationId);
+            populateConversationSidebar(currentModelName, modelData);
         }
+        
         messageInput.disabled = false;
         sendButton.disabled = false;
         messageInput.focus();
-    }
 
-    async function clearStoredChatHistory(currentModelName) {
-        if (!chrome.storage || !chrome.storage.local) {
-            console.warn('Chrome storage API not available. Chat history will not be cleared from storage.');
-            return;
-        }
-        try {
-            const key = getStorageKey(currentModelName);
-            await chrome.storage.local.remove(key);
-            console.log(`Stored chat history cleared for ${currentModelName}`);
-        } catch (error) {
-            console.error('Error clearing stored chat history:', error);
+        // Sidebar collapse/expand persistence
+        const savedSidebarState = await chrome.storage.local.get(sidebarStateKey);
+        if (savedSidebarState && savedSidebarState[sidebarStateKey] === 'collapsed') {
+            conversationSidebar.classList.add('collapsed');
+            collapseSidebarButton.innerHTML = '&#x2192;'; // Right arrow
+        } else {
+            conversationSidebar.classList.remove('collapsed');
+            collapseSidebarButton.innerHTML = '&#x2190;'; // Left arrow
         }
     }
 
-    let availableModels = []; // To store fetched models
+    // Event Listeners
+    sendButton.addEventListener('click', () => sendMessageToOllama(messageInput.value));
+    messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessageToOllama(messageInput.value); });
+    
+    clearChatButton.addEventListener('click', () => clearAllConversationsForModel(currentModelName));
+    
+    newChatButton.addEventListener('click', () => startNewConversation(currentModelName));
 
-    // Function to get model name from URL query parameters
-    function getModelNameFromURL() {
-        const params = new URLSearchParams(window.location.search);
-        return params.get('model');
-    }
-
-    // Initialize: Get model name and display it
-    modelName = getModelNameFromURL();
-    if (modelName) {
-        modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(modelName)}`;
-        // Load chat history
-        const historyLoaded = await loadChatHistory(modelName);
-        if (!historyLoaded) {
-            // Initial greeting only if no history was loaded
-            addMessageToChat(modelName, `Hello! Ask me anything. (Model: ${decodeURIComponent(modelName)})`, 'bot-message');
-        }
-    } else {
-        modelNameDisplay.textContent = 'Error: Model name not specified.';
-        messageInput.disabled = true;
-        sendButton.disabled = true;
-        addMessageToChat('System', 'No model specified. Please select a model from the extension popup.', 'bot-message');
-        return;
-    }
-
-    // Function to add a message to the chat container
-    function addMessageToChat(sender, text, messageClass) {
-        const messageDiv = document.createElement('div');
-        messageDiv.classList.add('message', messageClass);
-
-        const senderDiv = document.createElement('div');
-        senderDiv.classList.add('message-sender');
-        senderDiv.textContent = sender;
-
-        const textDiv = document.createElement('div');
-        textDiv.textContent = text; // Using textContent to prevent XSS
-
-        messageDiv.appendChild(senderDiv);
-        messageDiv.appendChild(textDiv);
-        chatContainer.appendChild(messageDiv);
-        chatContainer.scrollTop = chatContainer.scrollHeight; // Scroll to the bottom
-    }
-
-    // Function to send message to the Ollama API via proxy
-    async function sendMessageToOllama(prompt) {
-        if (!prompt.trim()) return;
-
-        addMessageToChat('You', prompt, 'user-message');
-        messageInput.value = ''; // Clear input field
-        loadingIndicator.style.display = 'block';
-        sendButton.disabled = true;
-        messageInput.disabled = true;
-
-        // Add user message to conversation history
-        conversationHistory.push({ role: 'user', content: prompt });
-        await saveChatHistory(modelName, conversationHistory); // Save after adding user message
-
-        const proxyUrl = 'http://localhost:3000/proxy/api/chat';
-
-        try {
-            const response = await fetch(proxyUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    model: modelName,
-                    messages: conversationHistory, // Send the whole history
-                    stream: false // We are not handling streaming responses in this version
-                }),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ message: 'Unknown error structure' }));
-                console.error('Error from Ollama API:', response.status, errorData);
-                addMessageToChat(modelName, `Error: ${errorData.error || response.statusText || 'Failed to get response.'}`, 'bot-message');
-                // Remove last user message from history if bot failed, so user can retry the same prompt
-                // Or, keep it, depending on desired retry behavior. For now, let's keep it.
-            } else {
-                const data = await response.json();
-                if (data.message && data.message.content) {
-                    addMessageToChat(modelName, data.message.content, 'bot-message');
-                    // Add bot response to conversation history
-                    conversationHistory.push({ role: 'assistant', content: data.message.content });
-                    await saveChatHistory(modelName, conversationHistory); // Save after adding bot message
-                } else {
-                    addMessageToChat(modelName, 'Received an empty or unexpected response from the model.', 'bot-message');
-                }
-            }
-        } catch (error) {
-            console.error('Failed to send message:', error);
-            addMessageToChat('System', `Network Error: Could not connect to the proxy server or Ollama. Details: ${error.message}`, 'bot-message');
-        } finally {
-            loadingIndicator.style.display = 'none';
-            sendButton.disabled = false;
-            messageInput.disabled = false;
-            messageInput.focus();
-        }
-    }
-
-    // Event listeners
-    sendButton.addEventListener('click', () => {
-        sendMessageToOllama(messageInput.value);
-    });
-
-    messageInput.addEventListener('keypress', (event) => {
-        if (event.key === 'Enter') {
-            sendMessageToOllama(messageInput.value);
+    modelSwitcherButton.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (modelSwitcherDropdown.style.display === 'block') {
+            modelSwitcherDropdown.style.display = 'none';
+        } else {
+            const models = await fetchAvailableModels();
+            populateModelDropdown(models);
+            modelSwitcherDropdown.style.display = 'block';
         }
     });
 
-    // console.log(`Chat initialized for model: ${modelName}`); // Moved or handled by loadChatHistory
-
-    // Auto-focus message input when tab becomes visible
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            if (messageInput && !messageInput.disabled) {
-                messageInput.focus();
-            }
+    document.addEventListener('click', (e) => {
+        if (!modelSwitcherButton.contains(e.target) && !modelSwitcherDropdown.contains(e.target)) {
+            modelSwitcherDropdown.style.display = 'none';
         }
     });
 
-    // Event listener for Clear Chat History button
-    if (clearChatButton) {
-        clearChatButton.addEventListener('click', async () => {
-            if (modelName && window.confirm(`Are you sure you want to clear the chat history for ${decodeURIComponent(modelName)}? This action cannot be undone.`)) {
-                // Clear in-memory history
-                conversationHistory = [];
+    collapseSidebarButton.addEventListener('click', async () => {
+        conversationSidebar.classList.toggle('collapsed');
+        const isCollapsed = conversationSidebar.classList.contains('collapsed');
+        collapseSidebarButton.innerHTML = isCollapsed ? '&#x2192;' : '&#x2190;'; // Right/Left arrow
+        await chrome.storage.local.set({ [sidebarStateKey]: isCollapsed ? 'collapsed' : 'expanded' });
+    });
 
-                // Clear UI
-                while (chatContainer.firstChild) {
-                    chatContainer.removeChild(chatContainer.firstChild);
-                }
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') messageInput.focus(); });
 
-                // Clear stored history
-                await clearStoredChatHistory(modelName);
+    init();
 
-                // Add initial greeting back
-                addMessageToChat(modelName, `Hello! Ask me anything. (Model: ${decodeURIComponent(modelName)})`, 'bot-message');
-                
-                // Ensure input is usable
-                messageInput.disabled = false;
-                sendButton.disabled = false;
-                messageInput.focus();
-                console.log(`Chat history cleared for ${modelName} by user.`);
-            }
-        });
-    }
-
-    // Event listener for Model Switcher button
-    if (modelSwitcherButton && modelSwitcherDropdown) {
-        modelSwitcherButton.addEventListener('click', async (e) => {
-            e.stopPropagation(); // Prevent click from closing dropdown immediately if it's handled by a global listener
-            if (modelSwitcherDropdown.style.display === 'block') {
-                modelSwitcherDropdown.style.display = 'none';
-            } else {
-                const models = await fetchAvailableModels();
-                populateModelDropdown(models);
-                modelSwitcherDropdown.style.display = 'block';
-            }
-        });
-
-        // Optional: Close dropdown if clicked outside
-        document.addEventListener('click', (e) => {
-            if (modelSwitcherDropdown.style.display === 'block' && 
-                !modelSwitcherDropdown.contains(e.target) && 
-                e.target !== modelSwitcherButton && 
-                !modelSwitcherButton.contains(e.target)) {
-                modelSwitcherDropdown.style.display = 'none';
-            }
-        });
-    }
 });
