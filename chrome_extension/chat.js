@@ -18,21 +18,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     let availableModels = [];
 
     function getModelStorageKey(model) {
-        return `${storageKeyPrefix}${model.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+        const key = `${storageKeyPrefix}${model.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+        console.log('[OllamaBro] getModelStorageKey - Model:', model, 'Generated Key:', key);
+        return key;
     }
 
     async function loadModelChatState(modelToLoad) {
+        console.log('[OllamaBro] loadModelChatState - Attempting to load for model:', modelToLoad);
         if (!chrome.storage || !chrome.storage.local) {
             console.warn('Chrome storage API not available.');
             return { conversations: {}, activeConversationId: null };
         }
         try {
-            const key = getModelStorageKey(modelToLoad);
-            const data = await chrome.storage.local.get(key);
-            if (data && data[key]) {
-                console.log(`Chat state loaded for ${modelToLoad}`);
-                return data[key]; // Should contain { conversations: {...}, activeConversationId: '...' }
+            const key = getModelStorageKey(modelToLoad); // Key generation will also log
+            const storageResult = await chrome.storage.local.get(key);
+            console.log('[OllamaBro] loadModelChatState - Key used:', key, 'Data loaded from storage:', storageResult);
+
+            let modelSpecificData = storageResult[key];
+
+            if (modelSpecificData) {
+                // Ensure a deep copy for logging to avoid showing mutated object if it's referenced elsewhere
+                console.log(`Raw chat state loaded for ${modelToLoad}:`, JSON.parse(JSON.stringify(modelSpecificData)));
+                // Ensure the conversations property exists and is an object
+                if (typeof modelSpecificData.conversations !== 'object' || modelSpecificData.conversations === null) {
+                    console.warn(`[OllamaBro] loadModelChatState - 'conversations' property missing or not an object for model ${modelToLoad}. Initializing.`);
+                    modelSpecificData.conversations = {};
+                }
+                // Ensure activeConversationId exists (can be null)
+                if (typeof modelSpecificData.activeConversationId === 'undefined') {
+                     modelSpecificData.activeConversationId = null;
+                }
+                return modelSpecificData;
             }
+            console.log(`[OllamaBro] loadModelChatState - No data found for ${modelToLoad}. Returning default.`);
             return { conversations: {}, activeConversationId: null }; // Default if nothing stored
         } catch (error) {
             console.error('Error loading chat state:', error);
@@ -41,13 +59,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function saveModelChatState(modelToSave, modelData) {
+        console.log('[OllamaBro] saveModelChatState - Attempting to save for model:', modelToSave, 'Data:', modelData);
         if (!chrome.storage || !chrome.storage.local) {
             console.warn('Chrome storage API not available.');
             return;
         }
         try {
-            const key = getModelStorageKey(modelToSave);
+            const key = getModelStorageKey(modelToSave); // Key generation will also log
             await chrome.storage.local.set({ [key]: modelData });
+            console.log('[OllamaBro] saveModelChatState - Key used:', key, 'Save successful.');
             console.log(`Chat state saved for ${modelToSave}`);
         } catch (error) {
             console.error('Error saving chat state:', error);
@@ -280,7 +300,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function switchModel(newModelName) {
-        if (newModelName === currentModelName) return;
+        const oldModelName = currentModelName;
+        if (newModelName === oldModelName) return;
+        console.log('[OllamaBro] switchModel - Switching from:', oldModelName, 'to:', newModelName);
         console.log(`Switching model to: ${newModelName}`);
         currentModelName = newModelName;
         modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(currentModelName)}`;
@@ -348,6 +370,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
         currentModelName = urlModel;
+        console.log('[OllamaBro] init - Initializing chat for model from URL:', currentModelName);
         modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(currentModelName)}`;
 
         let modelData = await loadModelChatState(currentModelName);
