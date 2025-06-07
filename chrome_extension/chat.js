@@ -36,21 +36,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             let modelSpecificData = storageResult[key];
 
-            if (modelSpecificData) {
+            if (modelSpecificData && typeof modelSpecificData === 'object') {
+                // Data exists and is an object, proceed with checks
                 // Ensure a deep copy for logging to avoid showing mutated object if it's referenced elsewhere
-                console.log(`Raw chat state loaded for ${modelToLoad}:`, JSON.parse(JSON.stringify(modelSpecificData)));
-                // Ensure the conversations property exists and is an object
+                try {
+                    console.log(`Raw chat state loaded for ${modelToLoad}:`, JSON.parse(JSON.stringify(modelSpecificData)));
+                } catch (e) {
+                    console.warn(`[OllamaBro] loadModelChatState - Could not stringify modelSpecificData for logging for model ${modelToLoad}:`, modelSpecificData);
+                }
+
                 if (typeof modelSpecificData.conversations !== 'object' || modelSpecificData.conversations === null) {
                     console.warn(`[OllamaBro] loadModelChatState - 'conversations' property missing or not an object for model ${modelToLoad}. Initializing.`);
                     modelSpecificData.conversations = {};
                 }
-                // Ensure activeConversationId exists (can be null)
                 if (typeof modelSpecificData.activeConversationId === 'undefined') {
-                     modelSpecificData.activeConversationId = null;
+                    console.warn(`[OllamaBro] loadModelChatState - 'activeConversationId' property missing for model ${modelToLoad}. Initializing to null.`);
+                    modelSpecificData.activeConversationId = null;
                 }
                 return modelSpecificData;
+            } else if (modelSpecificData) {
+                // Data exists but is NOT an object (e.g., string, number, boolean due to corruption)
+                console.warn(`[OllamaBro] loadModelChatState - Data for model ${modelToLoad} is not an object:`, modelSpecificData, ". Resetting to default structure.");
+                return { conversations: {}, activeConversationId: null }; // Return default structure
             }
-            console.log(`[OllamaBro] loadModelChatState - No data found for ${modelToLoad}. Returning default.`);
+            // modelSpecificData is null or undefined (no data for this key)
+            console.log(`[OllamaBro] loadModelChatState - No data found for ${modelToLoad}. Returning default structure.`);
             return { conversations: {}, activeConversationId: null }; // Default if nothing stored
         } catch (error) {
             console.error('Error loading chat state:', error);
