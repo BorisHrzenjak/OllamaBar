@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OllamaBro Models</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            width: 300px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h3 {
+            margin-top: 0;
+            color: #007bff;
+            text-align: center;
+        }
+        #modelList {
+            list-style-type: none;
+            padding: 0;
+            margin: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fff;
+        }
+        #modelList li {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+        }
+        #modelList li:last-child {
+            border-bottom: none;
+        }
+        #modelList li:hover {
+            background-color: #e9ecef;
+        }
+        #loadingMessage, #errorMessage {
+            text-align: center;
+            padding: 10px;
+            color: #777;
+        }
+        #errorMessage {
+            color: #d9534f; /* Red for errors */
+        }
+        .model-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .model-name {
+            font-weight: bold;
+        }
+        .model-details {
+            font-size: 0.8em;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <h3>Ollama Models</h3>
+    <div id="loadingMessage">Loading models...</div>
+    <div id="errorMessage" style="display:none;"></div>
+    <ul id="modelList">
+        <!-- Models will be listed here by JavaScript -->
+    </ul>
+    <script src="popup.js" defer></script>
+</body>
+</html>

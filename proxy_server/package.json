@@ -1,0 +1,21 @@
+{
+  "name": "ollamabro-proxy",
+  "version": "1.0.0",
+  "description": "CORS Proxy server for OllamaBro Chrome Extension",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ollama",
+    "cors",
+    "proxy"
+  ],
+  "author": "OllamaBro User via Cascade",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5"
+  }
+}
