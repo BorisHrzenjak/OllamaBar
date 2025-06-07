@@ -5,6 +5,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sendButton = document.getElementById('sendButton');
     const loadingIndicator = document.getElementById('loadingIndicator');
     const clearChatButton = document.getElementById('clearChatButton');
+    const modelSwitcherButton = document.getElementById('modelSwitcherButton');
+    const modelSwitcherDropdown = document.getElementById('modelSwitcherDropdown');
 
     let modelName = '';
     let conversationHistory = []; // To store messages for context
@@ -51,6 +53,75 @@ document.addEventListener('DOMContentLoaded', async () => {
         return false;
     }
 
+    // --- Model Switcher Functions ---
+    async function fetchAvailableModels() {
+        if (availableModels.length > 0) return availableModels; // Return cached if already fetched
+        const proxyUrl = 'http://localhost:3000/proxy/api/tags';
+        try {
+            const response = await fetch(proxyUrl);
+            if (!response.ok) {
+                console.error('Failed to fetch models:', response.status, await response.text());
+                return [];
+            }
+            const data = await response.json();
+            availableModels = data.models ? data.models.map(m => m.name) : [];
+            console.log('Available models fetched:', availableModels);
+            return availableModels;
+        } catch (error) {
+            console.error('Error fetching available models:', error);
+            return [];
+        }
+    }
+
+    function populateModelDropdown(models) {
+        modelSwitcherDropdown.innerHTML = ''; // Clear previous items
+        if (models.length === 0) {
+            const noModelsItem = document.createElement('div');
+            noModelsItem.textContent = 'No models found or error fetching.';
+            noModelsItem.classList.add('model-dropdown-item');
+            noModelsItem.style.fontStyle = 'italic';
+            noModelsItem.style.color = '#777';
+            modelSwitcherDropdown.appendChild(noModelsItem);
+            return;
+        }
+        models.forEach(mName => {
+            const item = document.createElement('a'); // Use <a> for semantics, styled as block
+            item.href = '#'; // Prevent page jump
+            item.classList.add('model-dropdown-item');
+            item.textContent = mName;
+            item.dataset.modelName = mName;
+            item.addEventListener('click', async (e) => {
+                e.preventDefault();
+                await switchModel(mName);
+                modelSwitcherDropdown.style.display = 'none'; // Hide dropdown after selection
+            });
+            modelSwitcherDropdown.appendChild(item);
+        });
+    }
+
+    async function switchModel(newModelName) {
+        if (newModelName === modelName) return; // No change
+
+        console.log(`Switching model to: ${newModelName}`);
+        modelName = newModelName;
+        modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(modelName)}`;
+        conversationHistory = []; // Reset history for the new model context
+
+        // Clear UI
+        while (chatContainer.firstChild) {
+            chatContainer.removeChild(chatContainer.firstChild);
+        }
+
+        // Load history for the new model or show greeting
+        const historyLoaded = await loadChatHistory(modelName);
+        if (!historyLoaded) {
+            addMessageToChat(modelName, `Hello! Ask me anything. (Model: ${decodeURIComponent(modelName)})`, 'bot-message');
+        }
+        messageInput.disabled = false;
+        sendButton.disabled = false;
+        messageInput.focus();
+    }
+
     async function clearStoredChatHistory(currentModelName) {
         if (!chrome.storage || !chrome.storage.local) {
             console.warn('Chrome storage API not available. Chat history will not be cleared from storage.');
@@ -64,6 +135,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.error('Error clearing stored chat history:', error);
         }
     }
+
+    let availableModels = []; // To store fetched models
 
     // Function to get model name from URL query parameters
     function getModelNameFromURL() {
@@ -209,6 +282,30 @@ document.addEventListener('DOMContentLoaded', async () => {
                 sendButton.disabled = false;
                 messageInput.focus();
                 console.log(`Chat history cleared for ${modelName} by user.`);
+            }
+        });
+    }
+
+    // Event listener for Model Switcher button
+    if (modelSwitcherButton && modelSwitcherDropdown) {
+        modelSwitcherButton.addEventListener('click', async (e) => {
+            e.stopPropagation(); // Prevent click from closing dropdown immediately if it's handled by a global listener
+            if (modelSwitcherDropdown.style.display === 'block') {
+                modelSwitcherDropdown.style.display = 'none';
+            } else {
+                const models = await fetchAvailableModels();
+                populateModelDropdown(models);
+                modelSwitcherDropdown.style.display = 'block';
+            }
+        });
+
+        // Optional: Close dropdown if clicked outside
+        document.addEventListener('click', (e) => {
+            if (modelSwitcherDropdown.style.display === 'block' && 
+                !modelSwitcherDropdown.contains(e.target) && 
+                e.target !== modelSwitcherButton && 
+                !modelSwitcherButton.contains(e.target)) {
+                modelSwitcherDropdown.style.display = 'none';
             }
         });
     }
