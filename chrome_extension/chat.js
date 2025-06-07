@@ -1,12 +1,69 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const modelNameDisplay = document.getElementById('modelNameDisplay');
     const chatContainer = document.getElementById('chatContainer');
     const messageInput = document.getElementById('messageInput');
     const sendButton = document.getElementById('sendButton');
     const loadingIndicator = document.getElementById('loadingIndicator');
+    const clearChatButton = document.getElementById('clearChatButton');
 
     let modelName = '';
     let conversationHistory = []; // To store messages for context
+    const storageKeyPrefix = 'ollamaBroChat_';
+
+    // --- Storage Helper Functions ---
+    function getStorageKey(currentModelName) {
+        return `${storageKeyPrefix}${currentModelName.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+    }
+
+    async function saveChatHistory(currentModelName, history) {
+        if (!chrome.storage || !chrome.storage.local) {
+            console.warn('Chrome storage API not available. Chat history will not be saved.');
+            return;
+        }
+        try {
+            const key = getStorageKey(currentModelName);
+            await chrome.storage.local.set({ [key]: { conversationHistory: history, timestamp: new Date().toISOString() } });
+            console.log(`Chat history saved for ${currentModelName}`);
+        } catch (error) {
+            console.error('Error saving chat history:', error);
+        }
+    }
+
+    async function loadChatHistory(currentModelName) {
+        if (!chrome.storage || !chrome.storage.local) {
+            console.warn('Chrome storage API not available. Chat history will not be loaded.');
+            return false;
+        }
+        try {
+            const key = getStorageKey(currentModelName);
+            const data = await chrome.storage.local.get(key);
+            if (data && data[key] && data[key].conversationHistory) {
+                conversationHistory = data[key].conversationHistory;
+                conversationHistory.forEach(msg => {
+                    addMessageToChat(msg.role === 'user' ? 'You' : currentModelName, msg.content, msg.role === 'user' ? 'user-message' : 'bot-message');
+                });
+                console.log(`Chat history loaded for ${currentModelName}`);
+                return true;
+            }
+        } catch (error) {
+            console.error('Error loading chat history:', error);
+        }
+        return false;
+    }
+
+    async function clearStoredChatHistory(currentModelName) {
+        if (!chrome.storage || !chrome.storage.local) {
+            console.warn('Chrome storage API not available. Chat history will not be cleared from storage.');
+            return;
+        }
+        try {
+            const key = getStorageKey(currentModelName);
+            await chrome.storage.local.remove(key);
+            console.log(`Stored chat history cleared for ${currentModelName}`);
+        } catch (error) {
+            console.error('Error clearing stored chat history:', error);
+        }
+    }
 
     // Function to get model name from URL query parameters
     function getModelNameFromURL() {
@@ -18,6 +75,12 @@ document.addEventListener('DOMContentLoaded', () => {
     modelName = getModelNameFromURL();
     if (modelName) {
         modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(modelName)}`;
+        // Load chat history
+        const historyLoaded = await loadChatHistory(modelName);
+        if (!historyLoaded) {
+            // Initial greeting only if no history was loaded
+            addMessageToChat(modelName, `Hello! Ask me anything. (Model: ${decodeURIComponent(modelName)})`, 'bot-message');
+        }
     } else {
         modelNameDisplay.textContent = 'Error: Model name not specified.';
         messageInput.disabled = true;
@@ -56,6 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Add user message to conversation history
         conversationHistory.push({ role: 'user', content: prompt });
+        await saveChatHistory(modelName, conversationHistory); // Save after adding user message
 
         const proxyUrl = 'http://localhost:3000/proxy/api/chat';
 
@@ -84,6 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     addMessageToChat(modelName, data.message.content, 'bot-message');
                     // Add bot response to conversation history
                     conversationHistory.push({ role: 'assistant', content: data.message.content });
+                    await saveChatHistory(modelName, conversationHistory); // Save after adding bot message
                 } else {
                     addMessageToChat(modelName, 'Received an empty or unexpected response from the model.', 'bot-message');
                 }
@@ -110,7 +175,41 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Initial greeting or instruction
-    addMessageToChat(modelName, `Hello! Ask me anything. (Model: ${decodeURIComponent(modelName)})`, 'bot-message');
-    console.log(`Chat initialized for model: ${modelName}`);
+    // console.log(`Chat initialized for model: ${modelName}`); // Moved or handled by loadChatHistory
+
+    // Auto-focus message input when tab becomes visible
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            if (messageInput && !messageInput.disabled) {
+                messageInput.focus();
+            }
+        }
+    });
+
+    // Event listener for Clear Chat History button
+    if (clearChatButton) {
+        clearChatButton.addEventListener('click', async () => {
+            if (modelName && window.confirm(`Are you sure you want to clear the chat history for ${decodeURIComponent(modelName)}? This action cannot be undone.`)) {
+                // Clear in-memory history
+                conversationHistory = [];
+
+                // Clear UI
+                while (chatContainer.firstChild) {
+                    chatContainer.removeChild(chatContainer.firstChild);
+                }
+
+                // Clear stored history
+                await clearStoredChatHistory(modelName);
+
+                // Add initial greeting back
+                addMessageToChat(modelName, `Hello! Ask me anything. (Model: ${decodeURIComponent(modelName)})`, 'bot-message');
+                
+                // Ensure input is usable
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                messageInput.focus();
+                console.log(`Chat history cleared for ${modelName} by user.`);
+            }
+        });
+    }
 });
