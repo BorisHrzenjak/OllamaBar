@@ -148,6 +148,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         URL.revokeObjectURL(url);
     }
 
+    function parseAndStyleThinking(text) {
+        const fragment = document.createDocumentFragment();
+        // Ensure text is a string; treat null/undefined as empty string
+        if (typeof text !== 'string' || text === null) {
+            if (text === null || typeof text === 'undefined') text = '';
+            else text = String(text);
+        }
+
+        const regex = /<\s*think\s*>([\s\S]*?)<\/\s*think\s*>/gi; // Handles raw <think> tags, case-insensitive, allows spaces
+        let lastIndex = 0;
+        let match;
+
+        while ((match = regex.exec(text)) !== null) {
+            // Add text before the <think> tag
+            if (match.index > lastIndex) {
+                fragment.appendChild(document.createTextNode(text.substring(lastIndex, match.index)));
+            }
+            // Add the <think> content, styled
+            const thinkingSpan = document.createElement('span');
+            thinkingSpan.className = 'thinking-block';
+            thinkingSpan.textContent = match[1]; // Content between <think> and </think>
+            fragment.appendChild(thinkingSpan);
+            lastIndex = regex.lastIndex;
+        }
+
+        // Add any remaining text after the last </think>
+        if (lastIndex < text.length) {
+            fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
+        }
+        return fragment;
+    }
+
     function addMessageToChatUI(sender, initialText, messageClass, modelDataForFilename) {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', messageClass);
@@ -161,7 +193,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Message text content wrapper
         const textContentDiv = document.createElement('div');
         textContentDiv.classList.add('message-text-content'); 
-        textContentDiv.textContent = initialText;
+        if (messageClass === 'bot-message') {
+            // Ensure initialText is treated as a string, even if null or undefined, before parsing
+            const textToParse = (initialText === null || typeof initialText === 'undefined') ? '' : String(initialText);
+            const fragment = parseAndStyleThinking(textToParse);
+            textContentDiv.appendChild(fragment);
+            textContentDiv.dataset.fullMessage = textToParse; // Initialize dataset for consistency
+        } else {
+            textContentDiv.textContent = initialText; // User messages don't need parsing for <think> tags
+        }
         messageDiv.appendChild(textContentDiv);
 
         if (messageClass === 'bot-message') {
@@ -253,7 +293,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function updateBotMessageInUI(botTextElement, newContentChunk) {
-        botTextElement.textContent += newContentChunk;
+        const previousRawFullText = botTextElement.dataset.fullMessage || ''; // Get raw from previous step
+        const currentRawFullText = previousRawFullText + newContentChunk; // Accumulate raw
+        
+        // Clear existing content and apply parsing to the whole updated text
+        botTextElement.innerHTML = ''; // Clear previous spans/text nodes
+        const fragment = parseAndStyleThinking(currentRawFullText); // Parse accumulated raw
+        botTextElement.appendChild(fragment);
+        
+        // Store the full accumulated raw message content (with tags) in the botTextElement's data attribute
+        botTextElement.dataset.fullMessage = currentRawFullText; 
+
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
@@ -403,7 +453,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         sendButton.disabled = true;
 
         const botTextElement = addMessageToChatUI(currentModelName, '', 'bot-message', modelData);
-        let fullBotResponse = '';
+        // fullBotResponse is no longer needed here, it's derived from botTextElement.dataset.fullMessage
 
         try {
             console.log(`Sending to /proxy/api/chat with model: ${currentModelName} for streaming.`);
@@ -450,7 +500,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                             if (jsonResponse.message && typeof jsonResponse.message.content === 'string') {
                                 console.log('Extracted text (jsonResponse.message.content):', jsonResponse.message.content);
                                 updateBotMessageInUI(botTextElement, jsonResponse.message.content);
-                                fullBotResponse += jsonResponse.message.content;
                             } else {
                                 console.log('jsonResponse.message.content is missing, not a string, or message object itself is missing.');
                                 // It's possible for 'done' messages to have no content, which is fine.
@@ -471,7 +520,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             console.log('Stream reading complete.');
 
-            currentConversation.messages.push({ role: 'assistant', content: fullBotResponse });
+            const finalBotMessageToSave = botTextElement.dataset.fullMessage || botTextElement.textContent; // Fallback to textContent if dataset is somehow not set
+            currentConversation.messages.push({ role: 'assistant', content: finalBotMessageToSave });
             currentConversation.summary = getConversationSummary(currentConversation.messages);
             currentConversation.lastMessageTime = Date.now();
 
