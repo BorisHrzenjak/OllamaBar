@@ -4,6 +4,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const messageInput = document.getElementById('messageInput');
     const sendButton = document.getElementById('sendButton');
     const loadingIndicator = document.getElementById('loadingIndicator');
+    
+    // Ensure loading indicator is hidden on initialization
+    if (loadingIndicator) {
+        loadingIndicator.style.display = 'none';
+    }
     const clearChatButton = document.getElementById('clearChatButton');
     const modelSwitcherButton = document.getElementById('modelSwitcherButton');
     const modelSwitcherDropdown = document.getElementById('modelSwitcherDropdown');
@@ -448,12 +453,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Do not save yet, save after bot response or error
 
         messageInput.value = '';
-        loadingIndicator.style.display = 'block';
+        // Only show loading indicator when actually sending a request
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'block';
+        }
         messageInput.disabled = true;
         sendButton.disabled = true;
 
         const botTextElement = addMessageToChatUI(currentModelName, '', 'bot-message', modelData);
-        // fullBotResponse is no longer needed here, it's derived from botTextElement.dataset.fullMessage
 
         try {
             console.log(`Sending to /proxy/api/chat with model: ${currentModelName} for streaming.`);
@@ -532,11 +539,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 errorMessage = error.message; 
             }
             updateBotMessageInUI(botTextElement, `\n\n[Error: ${errorMessage}]`);
-            currentConversation.messages.push({ role: 'assistant', content: fullBotResponse + `\n\n[Error: ${errorMessage}]` }); 
+            // Get the current content from the botTextElement to avoid using undefined variables
+            const currentBotContent = botTextElement.dataset.fullMessage || botTextElement.textContent || '';
+            currentConversation.messages.push({ role: 'assistant', content: currentBotContent + `\n\n[Error: ${errorMessage}]` }); 
             currentConversation.lastMessageTime = Date.now();
         } finally {
-            console.log('sendMessageToOllama finally block. Full bot response captured:', fullBotResponse);
-            loadingIndicator.style.display = 'none';
+            console.log('sendMessageToOllama finally block completed');
+            // Always hide the loading indicator when done, with null check
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
             messageInput.disabled = false;
             sendButton.disabled = false;
             messageInput.focus();
