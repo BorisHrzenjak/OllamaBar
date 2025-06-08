@@ -104,13 +104,38 @@ app.all('/proxy/*', (req, res) => {
         });
 
         if ((req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') && req.rawBody) {
-            console.log('Proxy to Ollama: Sending request body to Ollama:', req.rawBody);
+            let bodyToSend = req.rawBody;
+            let contentType = req.headers['content-type'] || 'application/json';
+
+            // Check if the request is for the chat API and is JSON
+            if (ollamaPath.startsWith('/api/chat') && contentType === 'application/json') {
+                try {
+                    const ollamaPayload = JSON.parse(req.rawBody);
+                    
+                    // Ensure streaming: true for /api/chat
+                    // Ollama defaults to streaming if 'stream' is not present or true.
+                    if (ollamaPayload.hasOwnProperty('stream') && ollamaPayload.stream === false) {
+                        ollamaPayload.stream = true; 
+                        console.log('Proxy to Ollama: Modified payload for /api/chat to ensure streaming (changed stream:false to stream:true).');
+                    } else if (!ollamaPayload.hasOwnProperty('stream')) {
+                        ollamaPayload.stream = true;
+                        console.log('Proxy to Ollama: Modified payload for /api/chat to ensure streaming (added stream:true).');
+                    }
+                    // If ollamaPayload.stream is already true, no changes needed to the stream property.
+
+                    bodyToSend = JSON.stringify(ollamaPayload);
+                } catch (e) {
+                    console.error('Proxy to Ollama: Error parsing/modifying JSON body for /api/chat, sending raw body as fallback:', e.message);
+                    // Fallback to sending rawBody if parsing/stringifying fails, bodyToSend remains req.rawBody
+                }
+            }
             
-            // Set Content-Type and Content-Length specifically for the outgoing request
-            proxyReq.setHeader('Content-Type', req.headers['content-type'] || 'application/json');
-            proxyReq.setHeader('Content-Length', Buffer.byteLength(req.rawBody));
+            console.log(`Proxy to Ollama: Sending request body to Ollama (Path: ${ollamaPath}):`, bodyToSend);
             
-            proxyReq.write(req.rawBody);
+            proxyReq.setHeader('Content-Type', contentType); // Use the original or default content type
+            proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyToSend));
+            
+            proxyReq.write(bodyToSend);
             proxyReq.end();
         } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
             console.warn('Proxy to Ollama: POST/PUT/PATCH request, but req.rawBody is not set. Attempting to pipe.');

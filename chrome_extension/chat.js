@@ -97,17 +97,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         return firstUserMessage ? firstUserMessage.content.substring(0, 40) : 'Chat'; // Max 40 chars for summary
     }
 
-    function addMessageToChatUI(sender, text, messageClass) {
+    function addMessageToChatUI(sender, initialText, messageClass) {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', messageClass);
+        
         const senderDiv = document.createElement('div');
         senderDiv.classList.add('message-sender');
         senderDiv.textContent = sender;
+        
         const textDiv = document.createElement('div');
-        textDiv.textContent = text;
+        textDiv.classList.add('message-content'); // Added class for easier selection if needed
+        textDiv.textContent = initialText;
+        
         messageDiv.appendChild(senderDiv);
         messageDiv.appendChild(textDiv);
         chatContainer.appendChild(messageDiv);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+        
+        return textDiv; // Return the element where text is displayed
+    }
+
+    function updateBotMessageInUI(botTextElement, newContentChunk) {
+        botTextElement.textContent += newContentChunk;
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
@@ -228,86 +239,139 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function sendMessageToOllama(prompt) {
-        if (!prompt.trim()) return;
+        if (!prompt || prompt.trim() === '') return;
 
         let modelData = await loadModelChatState(currentModelName);
         if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
-            console.warn('No active conversation found, starting a new one.');
+            console.warn('No active or valid conversation found, attempting to start a new one.');
+            // Attempt to start a new conversation and reload state
             await startNewConversation(currentModelName);
-            modelData = await loadModelChatState(currentModelName); // Reload modelData after new conv
+            modelData = await loadModelChatState(currentModelName);
+            // If still no active conversation, something is wrong, so return.
+            if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
+                console.error('Failed to start or find an active conversation after attempting to create one.');
+                addMessageToChatUI('System', 'Error: Could not establish an active conversation. Please try refreshing or creating a new chat manually.', 'error-message');
+                return;
+            }
         }
         const activeConvId = modelData.activeConversationId;
         const currentConversation = modelData.conversations[activeConvId];
 
+        // Add user message to UI and save state
         addMessageToChatUI('You', prompt, 'user-message');
+        currentConversation.messages.push({ role: 'user', content: prompt });
+        currentConversation.summary = getConversationSummary(currentConversation.messages);
+        currentConversation.lastMessageTime = Date.now();
+        await saveModelChatState(currentModelName, modelData);
+        populateConversationSidebar(currentModelName, modelData);
+
         messageInput.value = '';
         loadingIndicator.style.display = 'block';
-        sendButton.disabled = true;
         messageInput.disabled = true;
+        sendButton.disabled = true;
 
-        currentConversation.messages.push({ role: 'user', content: prompt });
-        currentConversation.lastMessageTime = Date.now();
-        if (currentConversation.messages.length === 1 && prompt) { // First user message
-            currentConversation.summary = getConversationSummary(currentConversation.messages);
-        }
+        let botTextElement = addMessageToChatUI(currentModelName, '', 'bot-message');
+        let fullBotResponse = '';
 
-        await saveModelChatState(currentModelName, modelData);
-        populateConversationSidebar(currentModelName, modelData); // Update sidebar with new summary/time
-
-        const proxyUrl = 'http://localhost:3000/proxy/api/chat';
         try {
-            const response = await fetch(proxyUrl, {
+            console.log(`Sending to /proxy/api/chat with model: ${currentModelName} for streaming.`);
+            const response = await fetch('http://localhost:3000/proxy/api/chat', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                },
                 body: JSON.stringify({
                     model: currentModelName,
-                    messages: currentConversation.messages.map(m => ({ role: m.role, content: m.content })), // Ensure only role/content sent
-                    stream: false
+                    messages: currentConversation.messages.filter(m => m.role === 'user' || m.role === 'assistant')
                 }),
             });
 
             if (!response.ok) {
-                const errorBody = await response.text();
-                console.error('Ollama API error:', response.status, errorBody);
-                addMessageToChatUI(currentModelName, `Error: ${response.status} - ${errorBody}`, 'bot-message');
-            // Hide loading indicator and re-enable inputs on API error
-            console.log('[OllamaBro] sendMessageToOllama (API Error): Attempting to hide loading indicator. Current display style:', loadingIndicator.style.display);
-            loadingIndicator.style.display = 'none';
-            console.log('[OllamaBro] sendMessageToOllama (API Error): Loading indicator hidden. New display style:', loadingIndicator.style.display);
-            sendButton.disabled = false;
-                messageInput.disabled = false;
-                messageInput.focus();
-                return; // Important to return after handling error
+                const errorText = await response.text().catch(() => 'Failed to get error text from non-OK response.');
+                console.error('Ollama API Error (stream):', response.status, errorText);
+                throw new Error(`Ollama API Error: ${response.status} ${errorText || response.statusText}`);
             }
 
-            const data = await response.json();
-            if (data.message && data.message.content) {
-                const botReply = data.message.content;
-                addMessageToChatUI(currentModelName, botReply, 'bot-message');
-                currentConversation.messages.push({ role: 'assistant', content: botReply });
+            if (!response.body) {
+                throw new Error('Response body is null, cannot read stream.');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    console.log('Stream finished reading.');
+                    break;
+                }
+                buffer += decoder.decode(value, { stream: true });
+                
+                let newlineIndex;
+                while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+                    const line = buffer.substring(0, newlineIndex).trim();
+                    buffer = buffer.substring(newlineIndex + 1);
+
+                    if (line) {
+                        try {
+                            const parsedChunk = JSON.parse(line);
+                            if (parsedChunk.message && parsedChunk.message.content) {
+                                fullBotResponse += parsedChunk.message.content;
+                                updateBotMessageInUI(botTextElement, parsedChunk.message.content);
+                            }
+                            // The 'done' property in each chunk usually indicates if that specific chunk is the last one from the model's generation for that turn, 
+                            // but the overall stream ends when reader.read() returns done:true.
+                            if (parsedChunk.done && parsedChunk.message && parsedChunk.message.content === '') {
+                                // This often signifies the true end of a successful stream from Ollama
+                                console.log('Ollama stream chunk indicated done:true with empty content.');
+                            }
+                        } catch (e) {
+                            console.warn('Error parsing JSON chunk from stream:', e, 'Chunk:', line);
+                        }
+                    }
+                }
+            }
+            
+            // Process any remaining buffer content after the stream ends
+            if (buffer.trim()) {
+                 try {
+                    const parsedChunk = JSON.parse(buffer.trim());
+                    if (parsedChunk.message && parsedChunk.message.content) {
+                        fullBotResponse += parsedChunk.message.content;
+                        updateBotMessageInUI(botTextElement, parsedChunk.message.content);
+                    }
+                } catch (e) {
+                    console.warn('Error parsing final JSON chunk from stream buffer:', e, 'Chunk:', buffer.trim());
+                }
+            }
+
+            // After stream is complete and all chunks processed
+            if (fullBotResponse.trim() !== '') {
+                currentConversation.messages.push({ role: 'assistant', content: fullBotResponse });
+                currentConversation.summary = getConversationSummary(currentConversation.messages);
                 currentConversation.lastMessageTime = Date.now();
                 await saveModelChatState(currentModelName, modelData);
                 populateConversationSidebar(currentModelName, modelData);
             } else {
-                addMessageToChatUI(currentModelName, 'Received an empty or unexpected response from the model.', 'bot-message');
+                if (botTextElement && botTextElement.parentElement && botTextElement.parentElement.classList.contains('message')) {
+                    botTextElement.parentElement.remove(); // Remove the empty bot message placeholder
+                }
+                console.log('Bot response was empty after streaming.');
             }
-            // Hide loading indicator and re-enable inputs after successful processing or non-200 response's else block
-            console.log('[OllamaBro] sendMessageToOllama: Attempting to hide loading indicator. Current display style:', loadingIndicator.style.display);
-            loadingIndicator.style.display = 'none';
-            console.log('[OllamaBro] sendMessageToOllama: Loading indicator hidden. New display style:', loadingIndicator.style.display);
-            sendButton.disabled = false;
-            messageInput.disabled = false;
-            messageInput.focus();
 
         } catch (error) {
-            console.error('Error sending message to Ollama:', error);
-            addMessageToChatUI(currentModelName, `Network or application error: ${error.message}`, 'bot-message');
-        // Hide loading indicator and re-enable inputs on network/other error
-        console.log('[OllamaBro] sendMessageToOllama (Catch Error): Attempting to hide loading indicator. Current display style:', loadingIndicator.style.display);
-        loadingIndicator.style.display = 'none';
-        console.log('[OllamaBro] sendMessageToOllama (Catch Error): Loading indicator hidden. New display style:', loadingIndicator.style.display);
-        sendButton.disabled = false;
+            console.error('Error sending message to Ollama or processing stream:', error);
+            if (botTextElement) { // Ensure botTextElement exists before trying to update it
+                updateBotMessageInUI(botTextElement, `\n\n--- ERROR: ${error.message} ---`);
+            }
+            // Optionally, add error to conversation history
+            // currentConversation.messages.push({ role: 'system', content: `Streaming Error: ${error.message}` });
+            // await saveModelChatState(currentModelName, modelData); // Consider if saving error state is desired
+        } finally {
+            loadingIndicator.style.display = 'none';
             messageInput.disabled = false;
+            sendButton.disabled = false;
             messageInput.focus();
         }
     }

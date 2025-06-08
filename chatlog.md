@@ -73,3 +73,52 @@
             *   Add a hover effect for the icon (lighter stroke color).
 
 **Outcome:** The "Clear Chat History" button is now a visually appealing trash bin icon located in the top-right corner of the chat header, improving the overall UI aesthetics. The functionality remains the same as the button's ID was not changed.
+
+
+## OllamaBro: Enhanced User Message Bubble Visibility (Step 23)
+
+**Goal:** Make user message bubbles in the chat interface more distinct and "pop" more.
+
+**Changes Made:**
+
+1.  **`chrome_extension/chat.html` (CSS):**
+    *   The `.user-message` CSS class was updated.
+    *   Added the property `border: 1px solid var(--theme-border-secondary);` to give user messages a defined border using the existing theme's secondary border color.
+    *   The existing `box-shadow: var(--theme-shadow-soft);` is inherited from the general `.message` class and contributes to the "pop" effect.
+
+**Outcome:** User message bubbles now have a border, making them visually more distinct from the background and assistant messages, improving the overall chat readability.
+
+
+## Cascade Update - Step 23 (Chat Streaming Fix)
+
+**USER Objective:** Implement Streaming LLM Responses in OllamaBar Chrome Extension.
+
+**Action Taken:**
+Applied significant restructuring to the `sendMessageToOllama` function in `chrome_extension/chat.js` to correctly implement streaming responses and address UI state issues.
+
+**Key Changes in `sendMessageToOllama`:**
+1.  **Corrected `try...catch...finally` Structure:** Ensured the entire message sending, stream fetching, processing, and UI update flow is within a robust error handling structure.
+2.  **User Message Persistence:** User's message is now added to history and saved *before* the API call.
+3.  **UI State Management:** Loading indicator and input field states are managed correctly, with the `finally` block ensuring they reset after success or failure. This specifically addresses the persistent loading indicator.
+4.  **Streaming Request Setup:** The `fetch` call correctly sends the `model` and `messages` payload for Ollama, relying on the proxy for enabling streaming.
+5.  **Stream Processing Logic:** Maintained the core logic for reading the `ReadableStream`, decoding NDJSON chunks, and incrementally updating the UI.
+6.  **Improved Error Handling:** Errors during fetch or stream processing are caught and displayed in the chat UI.
+7.  **Conversation State Update:** The full assistant response is saved to history after the stream completes.
+
+**Expected Outcome:** Streaming should now function correctly, the loading indicator issue should be resolved, and overall chat stability improved.
+
+
+## Cascade Update - Step 34 (Fix ERR_FILE_NOT_FOUND for Fetch)
+
+**USER Objective:** Resolve `net::ERR_FILE_NOT_FOUND` error when sending messages.
+
+**Issue Identified:**
+The `fetch` call in `sendMessageToOllama` was using a relative URL (`/proxy/api/chat`). In the context of a Chrome extension, this resolves to `chrome-extension://<extension-id>/proxy/api/chat`, which doesn't exist, causing the error.
+
+**Action Taken:**
+Modified `chrome_extension/chat.js` to change the `fetch` URL in `sendMessageToOllama` to the absolute path of the proxy server: `http://localhost:3000/proxy/api/chat`.
+
+**Key Change in `sendMessageToOllama`:**
+*   Updated `fetch('/proxy/api/chat', ...)` to `fetch('http://localhost:3000/proxy/api/chat', ...)`. Similar to how `fetchAvailableModels` correctly targets the proxy.
+
+**Expected Outcome:** The `net::ERR_FILE_NOT_FOUND` error should be resolved, and the chat messages should now be correctly sent to the proxy server for streaming.
