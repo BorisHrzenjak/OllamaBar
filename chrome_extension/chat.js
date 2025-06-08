@@ -266,16 +266,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }),
             });
 
-            loadingIndicator.style.display = 'none';
-            sendButton.disabled = false;
-            messageInput.disabled = false;
-            messageInput.focus();
-
             if (!response.ok) {
                 const errorBody = await response.text();
                 console.error('Ollama API error:', response.status, errorBody);
                 addMessageToChatUI(currentModelName, `Error: ${response.status} - ${errorBody}`, 'bot-message');
-                return;
+            // Hide loading indicator and re-enable inputs on API error
+            console.log('[OllamaBro] sendMessageToOllama (API Error): Attempting to hide loading indicator. Current display style:', loadingIndicator.style.display);
+            loadingIndicator.style.display = 'none';
+            console.log('[OllamaBro] sendMessageToOllama (API Error): Loading indicator hidden. New display style:', loadingIndicator.style.display);
+            sendButton.disabled = false;
+                messageInput.disabled = false;
+                messageInput.focus();
+                return; // Important to return after handling error
             }
 
             const data = await response.json();
@@ -285,15 +287,26 @@ document.addEventListener('DOMContentLoaded', async () => {
                 currentConversation.messages.push({ role: 'assistant', content: botReply });
                 currentConversation.lastMessageTime = Date.now();
                 await saveModelChatState(currentModelName, modelData);
-                populateConversationSidebar(currentModelName, modelData); // Update sidebar again if summary changed by bot (though unlikely here)
+                populateConversationSidebar(currentModelName, modelData);
             } else {
                 addMessageToChatUI(currentModelName, 'Received an empty or unexpected response from the model.', 'bot-message');
             }
+            // Hide loading indicator and re-enable inputs after successful processing or non-200 response's else block
+            console.log('[OllamaBro] sendMessageToOllama: Attempting to hide loading indicator. Current display style:', loadingIndicator.style.display);
+            loadingIndicator.style.display = 'none';
+            console.log('[OllamaBro] sendMessageToOllama: Loading indicator hidden. New display style:', loadingIndicator.style.display);
+            sendButton.disabled = false;
+            messageInput.disabled = false;
+            messageInput.focus();
+
         } catch (error) {
             console.error('Error sending message to Ollama:', error);
             addMessageToChatUI(currentModelName, `Network or application error: ${error.message}`, 'bot-message');
-            loadingIndicator.style.display = 'none';
-            sendButton.disabled = false;
+        // Hide loading indicator and re-enable inputs on network/other error
+        console.log('[OllamaBro] sendMessageToOllama (Catch Error): Attempting to hide loading indicator. Current display style:', loadingIndicator.style.display);
+        loadingIndicator.style.display = 'none';
+        console.log('[OllamaBro] sendMessageToOllama (Catch Error): Loading indicator hidden. New display style:', loadingIndicator.style.display);
+        sendButton.disabled = false;
             messageInput.disabled = false;
             messageInput.focus();
         }
@@ -347,28 +360,48 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    function populateModelDropdown(models) {
-        modelSwitcherDropdown.innerHTML = '';
+    function populateModelDropdown(models, currentModel) {
+        modelSwitcherDropdown.innerHTML = ''; // Clear previous items
+        const ul = document.createElement('ul');
+
         if (models.length === 0) {
-            const noModelsItem = document.createElement('div');
+            const noModelsItem = document.createElement('li');
             noModelsItem.textContent = 'No models found.';
-            noModelsItem.classList.add('model-dropdown-item');
-            modelSwitcherDropdown.appendChild(noModelsItem);
+            noModelsItem.classList.add('model-dropdown-item', 'no-models'); // Add a class for styling if needed
+            ul.appendChild(noModelsItem);
+            modelSwitcherDropdown.appendChild(ul);
             return;
         }
+
         models.forEach(mName => {
-            const item = document.createElement('a');
-            item.href = '#';
-            item.classList.add('model-dropdown-item');
-            item.textContent = mName;
-            item.dataset.modelName = mName;
-            item.addEventListener('click', async (e) => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.href = '#';
+            a.textContent = mName;
+            a.dataset.modelName = mName;
+            
+            li.classList.add('model-dropdown-item');
+            if (mName === currentModel) {
+                li.classList.add('active-model');
+            }
+
+            a.addEventListener('click', async (e) => {
                 e.preventDefault();
-                await switchModel(mName);
+                if (mName !== currentModelName) { // Prevent re-switching to the same model
+                    await switchModel(mName);
+                }
                 modelSwitcherDropdown.style.display = 'none';
+                // Re-populate to update active class, or just update class directly
+                // For simplicity, direct class update is better if switchModel doesn't recall populate.
+                // Assuming switchModel updates currentActiveModel globally.
+                const allItems = ul.querySelectorAll('li.model-dropdown-item');
+                allItems.forEach(item => item.classList.remove('active-model'));
+                li.classList.add('active-model');
             });
-            modelSwitcherDropdown.appendChild(item);
+            li.appendChild(a);
+            ul.appendChild(li);
         });
+        modelSwitcherDropdown.appendChild(ul);
     }
 
     async function init() {
@@ -420,7 +453,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             modelSwitcherDropdown.style.display = 'none';
         } else {
             const models = await fetchAvailableModels();
-            populateModelDropdown(models);
+            populateModelDropdown(models, currentModelName);
             modelSwitcherDropdown.style.display = 'block';
         }
     });
