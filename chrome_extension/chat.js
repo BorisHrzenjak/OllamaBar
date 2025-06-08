@@ -97,24 +97,159 @@ document.addEventListener('DOMContentLoaded', async () => {
         return firstUserMessage ? firstUserMessage.content.substring(0, 40) : 'Chat'; // Max 40 chars for summary
     }
 
-    function addMessageToChatUI(sender, initialText, messageClass) {
+    function getCurrentConversationMessages(modelData) {
+        if (modelData && modelData.activeConversationId && modelData.conversations && modelData.conversations[modelData.activeConversationId]) {
+            return modelData.conversations[modelData.activeConversationId].messages || [];
+        }
+        return [];
+    }
+
+    function generateFilename(extension, modelName, messages) {
+        const now = new Date();
+        const timestamp = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+        const summary = getConversationSummary(messages).replace(/[^a-zA-Z0-9_\-\.]/g, '_').substring(0, 30) || 'chat';
+        const cleanModelName = modelName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
+        return `${summary}_${cleanModelName}_${timestamp}.${extension}`;
+    }
+
+    async function copyToClipboard(text, buttonElement) {
+        try {
+            await navigator.clipboard.writeText(text);
+            if (buttonElement) {
+                const originalInnerHTML = buttonElement.innerHTML;
+                buttonElement.textContent = 'Copied!';
+                buttonElement.disabled = true;
+                setTimeout(() => {
+                    buttonElement.innerHTML = originalInnerHTML;
+                    buttonElement.disabled = false;
+                }, 1500);
+            }
+        } catch (err) {
+            console.error('Failed to copy text: ', err);
+            if (buttonElement) {
+                const originalInnerHTML = buttonElement.innerHTML;
+                buttonElement.textContent = 'Error';
+                setTimeout(() => {
+                    buttonElement.innerHTML = originalInnerHTML;
+                }, 1500);
+            }
+        }
+    }
+
+    function downloadMessage(text, filename, mimeType) {
+        const blob = new Blob([text], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function addMessageToChatUI(sender, initialText, messageClass, modelDataForFilename) {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', messageClass);
-        
+
+        // Sender name (You or Model Name)
         const senderDiv = document.createElement('div');
         senderDiv.classList.add('message-sender');
         senderDiv.textContent = sender;
-        
-        const textDiv = document.createElement('div');
-        textDiv.classList.add('message-content'); // Added class for easier selection if needed
-        textDiv.textContent = initialText;
-        
         messageDiv.appendChild(senderDiv);
-        messageDiv.appendChild(textDiv);
+
+        // Message text content wrapper
+        const textContentDiv = document.createElement('div');
+        textContentDiv.classList.add('message-text-content'); 
+        textContentDiv.textContent = initialText;
+        messageDiv.appendChild(textContentDiv);
+
+        if (messageClass === 'bot-message') {
+            const actionsDiv = document.createElement('div');
+            actionsDiv.classList.add('message-actions');
+
+            // Copy Button
+            const copyButton = document.createElement('button');
+            copyButton.classList.add('action-button', 'copy-button');
+            copyButton.title = 'Copy to clipboard';
+
+            const svgCopyIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svgCopyIcon.setAttribute('viewBox', '0 0 24 24');
+            svgCopyIcon.setAttribute('fill', 'currentColor');
+            svgCopyIcon.setAttribute('width', '18'); 
+            svgCopyIcon.setAttribute('height', '18');
+
+            const pathCopy = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            pathCopy.setAttribute('d', 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z');
+
+            svgCopyIcon.appendChild(pathCopy);
+            copyButton.appendChild(svgCopyIcon);
+
+            copyButton.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent message click if any
+                copyToClipboard(textContentDiv.textContent, copyButton);
+            });
+            actionsDiv.appendChild(copyButton);
+
+            // Download TXT Button
+            const downloadTxtButton = document.createElement('button');
+            downloadTxtButton.classList.add('action-button', 'download-txt-button');
+            downloadTxtButton.title = 'Download as .txt';
+
+            const svgTxtIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svgTxtIcon.setAttribute('viewBox', '0 0 24 24');
+            svgTxtIcon.setAttribute('fill', 'currentColor');
+            svgTxtIcon.setAttribute('width', '18');
+            svgTxtIcon.setAttribute('height', '18');
+
+            const pathTxt = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            pathTxt.setAttribute('d', 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z');
+
+            svgTxtIcon.appendChild(pathTxt);
+            downloadTxtButton.appendChild(svgTxtIcon);
+
+            downloadTxtButton.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const currentMessages = getCurrentConversationMessages(await loadModelChatState(currentModelName));
+                const filename = generateFilename('txt', currentModelName, currentMessages);
+                downloadMessage(textContentDiv.textContent, filename, 'text/plain;charset=utf-8');
+            });
+            actionsDiv.appendChild(downloadTxtButton);
+
+            // Download MD Button
+            const downloadMdButton = document.createElement('button');
+            downloadMdButton.classList.add('action-button', 'download-md-button');
+            downloadMdButton.title = 'Download as .md';
+
+            const svgMdIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svgMdIcon.setAttribute('viewBox', '0 0 24 24');
+            svgMdIcon.setAttribute('fill', 'currentColor');
+            svgMdIcon.setAttribute('width', '18');
+            svgMdIcon.setAttribute('height', '18');
+
+            const pathMd = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            pathMd.setAttribute('d', 'M9.4 16.6 4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0 4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z');
+
+            svgMdIcon.appendChild(pathMd);
+            downloadMdButton.appendChild(svgMdIcon);
+
+            downloadMdButton.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const currentMessages = getCurrentConversationMessages(await loadModelChatState(currentModelName));
+                const filename = generateFilename('md', currentModelName, currentMessages);
+                // Basic MD: just the text. Could be enhanced to include sender.
+                const mdContent = `## ${sender}\n\n${textContentDiv.textContent}`;
+                downloadMessage(mdContent, filename, 'text/markdown;charset=utf-utf-8');
+            });
+            actionsDiv.appendChild(downloadMdButton);
+
+            messageDiv.appendChild(actionsDiv);
+        }
+
         chatContainer.appendChild(messageDiv);
         chatContainer.scrollTop = chatContainer.scrollHeight;
         
-        return textDiv; // Return the element where text is displayed
+        return textContentDiv; // Return the element where text is displayed for streaming
     }
 
     function updateBotMessageInUI(botTextElement, newContentChunk) {
@@ -126,10 +261,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatContainer.innerHTML = ''; // Clear current messages
         if (modelData.conversations[conversationId] && modelData.conversations[conversationId].messages) {
             modelData.conversations[conversationId].messages.forEach(msg => {
-                addMessageToChatUI(msg.role === 'user' ? 'You' : currentModelName, msg.content, msg.role === 'user' ? 'user-message' : 'bot-message');
+                addMessageToChatUI(msg.role === 'user' ? 'You' : currentModelName, msg.content, msg.role === 'user' ? 'user-message' : 'bot-message', modelData);
             });
         } else {
-             addMessageToChatUI(currentModelName, `Hello! Start a new conversation with ${decodeURIComponent(currentModelName)}.`, 'bot-message');
+             addMessageToChatUI(currentModelName, `Hello! Start a new conversation with ${decodeURIComponent(currentModelName)}.`, 'bot-message', modelData);
         }
     }
 
@@ -244,13 +379,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         let modelData = await loadModelChatState(currentModelName);
         if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
             console.warn('No active or valid conversation found, attempting to start a new one.');
-            // Attempt to start a new conversation and reload state
             await startNewConversation(currentModelName);
             modelData = await loadModelChatState(currentModelName);
-            // If still no active conversation, something is wrong, so return.
             if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
                 console.error('Failed to start or find an active conversation after attempting to create one.');
-                addMessageToChatUI('System', 'Error: Could not establish an active conversation. Please try refreshing or creating a new chat manually.', 'error-message');
+                addMessageToChatUI('System', 'Error: Could not establish an active conversation. Please try refreshing or creating a new chat manually.', 'error-message', modelData);
                 return;
             }
         }
@@ -258,19 +391,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         const currentConversation = modelData.conversations[activeConvId];
 
         // Add user message to UI and save state
-        addMessageToChatUI('You', prompt, 'user-message');
+        addMessageToChatUI('You', prompt, 'user-message', modelData);
         currentConversation.messages.push({ role: 'user', content: prompt });
         currentConversation.summary = getConversationSummary(currentConversation.messages);
         currentConversation.lastMessageTime = Date.now();
-        await saveModelChatState(currentModelName, modelData);
-        populateConversationSidebar(currentModelName, modelData);
+        // Do not save yet, save after bot response or error
 
         messageInput.value = '';
         loadingIndicator.style.display = 'block';
         messageInput.disabled = true;
         sendButton.disabled = true;
 
-        let botTextElement = addMessageToChatUI(currentModelName, '', 'bot-message');
+        const botTextElement = addMessageToChatUI(currentModelName, '', 'bot-message', modelData);
         let fullBotResponse = '';
 
         try {
@@ -282,7 +414,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 },
                 body: JSON.stringify({
                     model: currentModelName,
-                    messages: currentConversation.messages.filter(m => m.role === 'user' || m.role === 'assistant')
+                    messages: currentConversation.messages.filter(m => m.role === 'user' || m.role === 'assistant'), // Send only user/assistant messages
+                    stream: true
                 }),
             });
 
@@ -293,88 +426,77 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             if (!response.body) {
-                throw new Error('Response body is null, cannot read stream.');
+                throw new Error('ReadableStream not available in response body.');
             }
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            let buffer = '';
+            let done = false;
 
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) {
-                    console.log('Stream finished reading.');
-                    break;
-                }
-                buffer += decoder.decode(value, { stream: true });
-                
-                let newlineIndex;
-                while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
-                    const line = buffer.substring(0, newlineIndex).trim();
-                    buffer = buffer.substring(newlineIndex + 1);
-
-                    if (line) {
+            console.log('Starting to read stream...');
+            while (!done) {
+                const { value, done: readerDone } = await reader.read();
+                done = readerDone;
+                if (value) {
+                    const chunk = decoder.decode(value, { stream: true });
+                    console.log('Raw chunk from stream:', chunk); // Log raw chunk
+                    const jsonResponses = chunk.split('\n').filter(Boolean);
+                    jsonResponses.forEach(jsonStr => {
+                        console.log('Processing JSON string:', jsonStr); // Log JSON string before parsing
                         try {
-                            const parsedChunk = JSON.parse(line);
-                            if (parsedChunk.message && parsedChunk.message.content) {
-                                fullBotResponse += parsedChunk.message.content;
-                                updateBotMessageInUI(botTextElement, parsedChunk.message.content);
+                            const jsonResponse = JSON.parse(jsonStr);
+                            console.log('Parsed JSON response:', jsonResponse); // Log parsed object
+
+                            if (jsonResponse.message && typeof jsonResponse.message.content === 'string') {
+                                console.log('Extracted text (jsonResponse.message.content):', jsonResponse.message.content);
+                                updateBotMessageInUI(botTextElement, jsonResponse.message.content);
+                                fullBotResponse += jsonResponse.message.content;
+                            } else {
+                                console.log('jsonResponse.message.content is missing, not a string, or message object itself is missing.');
+                                // It's possible for 'done' messages to have no content, which is fine.
+                                if (!jsonResponse.done) {
+                                     console.warn('Received a non-done chunk without message.content text.');
+                                }
                             }
-                            // The 'done' property in each chunk usually indicates if that specific chunk is the last one from the model's generation for that turn, 
-                            // but the overall stream ends when reader.read() returns done:true.
-                            if (parsedChunk.done && parsedChunk.message && parsedChunk.message.content === '') {
-                                // This often signifies the true end of a successful stream from Ollama
-                                console.log('Ollama stream chunk indicated done:true with empty content.');
+
+                            if (jsonResponse.done) {
+                                console.log('Stream finished by Ollama (jsonResponse.done is true)');
+                                done = true; 
                             }
                         } catch (e) {
-                            console.warn('Error parsing JSON chunk from stream:', e, 'Chunk:', line);
+                            console.warn('Failed to parse JSON chunk from stream:', jsonStr, e);
                         }
-                    }
+                    });
                 }
             }
-            
-            // Process any remaining buffer content after the stream ends
-            if (buffer.trim()) {
-                 try {
-                    const parsedChunk = JSON.parse(buffer.trim());
-                    if (parsedChunk.message && parsedChunk.message.content) {
-                        fullBotResponse += parsedChunk.message.content;
-                        updateBotMessageInUI(botTextElement, parsedChunk.message.content);
-                    }
-                } catch (e) {
-                    console.warn('Error parsing final JSON chunk from stream buffer:', e, 'Chunk:', buffer.trim());
-                }
-            }
+            console.log('Stream reading complete.');
 
-            // After stream is complete and all chunks processed
-            if (fullBotResponse.trim() !== '') {
-                currentConversation.messages.push({ role: 'assistant', content: fullBotResponse });
-                currentConversation.summary = getConversationSummary(currentConversation.messages);
-                currentConversation.lastMessageTime = Date.now();
-                await saveModelChatState(currentModelName, modelData);
-                populateConversationSidebar(currentModelName, modelData);
-            } else {
-                if (botTextElement && botTextElement.parentElement && botTextElement.parentElement.classList.contains('message')) {
-                    botTextElement.parentElement.remove(); // Remove the empty bot message placeholder
-                }
-                console.log('Bot response was empty after streaming.');
-            }
+            currentConversation.messages.push({ role: 'assistant', content: fullBotResponse });
+            currentConversation.summary = getConversationSummary(currentConversation.messages);
+            currentConversation.lastMessageTime = Date.now();
 
         } catch (error) {
             console.error('Error sending message to Ollama or processing stream:', error);
-            if (botTextElement) { // Ensure botTextElement exists before trying to update it
-                updateBotMessageInUI(botTextElement, `\n\n--- ERROR: ${error.message} ---`);
+            let errorMessage = 'Error communicating with the model. Please check the proxy server and Ollama status.';
+            if (error.message && error.message.includes('Ollama API Error')) {
+                errorMessage = error.message; 
             }
-            // Optionally, add error to conversation history
-            // currentConversation.messages.push({ role: 'system', content: `Streaming Error: ${error.message}` });
-            // await saveModelChatState(currentModelName, modelData); // Consider if saving error state is desired
+            updateBotMessageInUI(botTextElement, `\n\n[Error: ${errorMessage}]`);
+            currentConversation.messages.push({ role: 'assistant', content: fullBotResponse + `\n\n[Error: ${errorMessage}]` }); 
+            currentConversation.lastMessageTime = Date.now();
         } finally {
+            console.log('sendMessageToOllama finally block. Full bot response captured:', fullBotResponse);
             loadingIndicator.style.display = 'none';
             messageInput.disabled = false;
             sendButton.disabled = false;
             messageInput.focus();
+            
+            await saveModelChatState(currentModelName, modelData);
+            populateConversationSidebar(currentModelName, modelData); 
+            console.log('UI unlocked, state saved, sidebar repopulated in finally block.');
         }
     }
+
 
     async function clearAllConversationsForModel(modelToClear) {
         if (!confirm(`Are you sure you want to clear ALL chat history for ${decodeURIComponent(modelToClear)}? This action cannot be undone.`)) {
