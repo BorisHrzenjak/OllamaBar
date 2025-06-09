@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const storageKeyPrefix = 'ollamaBroChat_';
     const sidebarStateKey = 'ollamaBroSidebarState';
     let availableModels = [];
+    let currentAbortController = null; // Track current request for aborting
 
     function getModelStorageKey(model) {
         const key = `${storageKeyPrefix}${model.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
@@ -288,6 +289,36 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
             actionsDiv.appendChild(downloadMdButton);
 
+            // Stop Button (only show during streaming)
+            const stopButton = document.createElement('button');
+            stopButton.classList.add('action-button', 'stop-button');
+            stopButton.title = 'Stop generation';
+            stopButton.style.display = 'none'; // Hidden by default
+
+            const svgStopIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svgStopIcon.setAttribute('viewBox', '0 0 24 24');
+            svgStopIcon.setAttribute('fill', 'currentColor');
+            svgStopIcon.setAttribute('width', '18');
+            svgStopIcon.setAttribute('height', '18');
+
+            const pathStop = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            pathStop.setAttribute('d', 'M6 6h12v12H6z');
+
+            svgStopIcon.appendChild(pathStop);
+            stopButton.appendChild(svgStopIcon);
+
+            stopButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentAbortController) {
+                    currentAbortController.abort();
+                    stopButton.style.display = 'none';
+                }
+            });
+            actionsDiv.appendChild(stopButton);
+
+            // Store reference to stop button for later use
+            messageDiv.stopButton = stopButton;
+
             messageDiv.appendChild(actionsDiv);
         }
 
@@ -461,6 +492,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         sendButton.disabled = true;
 
         const botTextElement = addMessageToChatUI(currentModelName, '', 'bot-message', modelData);
+        const botMessageDiv = botTextElement.parentElement;
+        const stopButton = botMessageDiv.stopButton;
+
+        // Create AbortController for this request
+        currentAbortController = new AbortController();
+        
+        // Show stop button during streaming
+        if (stopButton) {
+            stopButton.style.display = 'flex';
+        }
 
         try {
             console.log(`Sending to /proxy/api/chat with model: ${currentModelName} for streaming.`);
@@ -474,6 +515,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     messages: currentConversation.messages.filter(m => m.role === 'user' || m.role === 'assistant'), // Send only user/assistant messages
                     stream: true
                 }),
+                signal: currentAbortController.signal // Add abort signal
             });
 
             if (!response.ok) {
@@ -517,7 +559,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                             if (jsonResponse.done) {
                                 console.log('Stream finished by Ollama (jsonResponse.done is true)');
-                                done = true; 
+                                done = true;
+                                // Hide stop button when streaming is complete
+                                if (stopButton) {
+                                    stopButton.style.display = 'none';
+                                }
                             }
                         } catch (e) {
                             console.warn('Failed to parse JSON chunk from stream:', jsonStr, e);
@@ -535,9 +581,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             console.error('Error sending message to Ollama or processing stream:', error);
             let errorMessage = 'Error communicating with the model. Please check the proxy server and Ollama status.';
-            if (error.message && error.message.includes('Ollama API Error')) {
+            
+            // Handle AbortError specifically
+            if (error.name === 'AbortError') {
+                errorMessage = 'Request was stopped by user.';
+                console.log('Request aborted by user');
+            } else if (error.message && error.message.includes('Ollama API Error')) {
                 errorMessage = error.message; 
             }
+            
             updateBotMessageInUI(botTextElement, `\n\n[Error: ${errorMessage}]`);
             // Get the current content from the botTextElement to avoid using undefined variables
             const currentBotContent = botTextElement.dataset.fullMessage || botTextElement.textContent || '';
@@ -545,6 +597,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             currentConversation.lastMessageTime = Date.now();
         } finally {
             console.log('sendMessageToOllama finally block completed');
+            
+            // Hide stop button and clear abort controller
+            if (stopButton) {
+                stopButton.style.display = 'none';
+            }
+            currentAbortController = null;
+            
             // Always hide the loading indicator when done, with null check
             if (loadingIndicator) {
                 loadingIndicator.style.display = 'none';
