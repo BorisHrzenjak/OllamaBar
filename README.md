@@ -1,6 +1,6 @@
-# OllamaBar
+# OllamaBro
 
-OllamaBar is a Chrome extension that provides a convenient interface to interact with your local Ollama models. It allows you to quickly switch between models, manage multiple conversations, and chat directly from your browser.
+OllamaBro is a Chrome extension that provides a convenient interface to interact with your local Ollama models. It allows you to quickly switch between models, manage multiple conversations, and chat directly from your browser.
 
 ## Features
 
