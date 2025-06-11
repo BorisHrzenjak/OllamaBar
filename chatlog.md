@@ -91,7 +91,7 @@
 
 ## Cascade Update - Step 23 (Chat Streaming Fix)
 
-**USER Objective:** Implement Streaming LLM Responses in OllamaBar Chrome Extension.
+**USER Objective:** Implement Streaming LLM Responses in OllamaBro Chrome Extension.
 
 **Action Taken:**
 Applied significant restructuring to the `sendMessageToOllama` function in `chrome_extension/chat.js` to correctly implement streaming responses and address UI state issues.

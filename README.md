@@ -1,9 +1,9 @@
-# OllamaBar
+# OllamaBro
 
 ![image](https://github.com/user-attachments/assets/58803a45-c3b4-4edf-8035-131f66751247)
 
 
-OllamaBar is a Chrome extension that provides a convenient interface to interact with your local Ollama models. It allows you to quickly switch between models, manage multiple conversations, and chat directly from your browser.
+OllamaBro is a Chrome extension that provides a convenient interface to interact with your local Ollama models. It allows you to quickly switch between models, manage multiple conversations, and chat directly from your browser.
 
 ## Features
 
@@ -37,7 +37,7 @@ The proxy server is necessary to bypass Cross-Origin Resource Sharing (CORS) res
 
 1.  Navigate to the `proxy_server` directory:
     ```bash
-    cd path/to/OllamaBar/proxy_server
+    cd path/to/OllamaBro/proxy_server
     ```
 2.  Install the dependencies:
     ```bash
@@ -59,7 +59,7 @@ To avoid having to manually start the server every time, you can use PM2, a proc
     ```
 2.  **Navigate to the proxy server directory**:
     ```bash
-    cd path/to/OllamaBar/proxy_server
+    cd path/to/OllamaBro/proxy_server
     ```
 3.  **Start the server with PM2**:
     ```bash
@@ -90,4 +90,4 @@ You can manage the process with these commands:
 3.  Click the **Load unpacked** button.
 4.  Select the `chrome_extension` folder from the project directory.
 
-The OllamaBar icon should now appear in your Chrome toolbar. Click it to see your available models and start chatting!
+The OllamaBro icon should now appear in your Chrome toolbar. Click it to see your available models and start chatting!

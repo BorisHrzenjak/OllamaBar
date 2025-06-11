@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OllamaBar is a Chrome extension that enables users to chat with local Ollama models directly in their browser. The project consists of two main components:
+OllamaBro is a Chrome extension that enables users to chat with local Ollama models directly in their browser. The project consists of two main components:
 
 1. **Chrome Extension** (`chrome_extension/`) - The frontend that runs in the browser
 2. **Proxy Server** (`proxy_server/`) - A CORS proxy server that facilitates communication between the extension and Ollama API
