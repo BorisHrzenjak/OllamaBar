@@ -166,6 +166,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    // Clear cache for LLaVA models to fix incorrect reasoning classification
+    function fixLlavaClassification() {
+        const llavaModels = ['llava', 'llava:7b', 'llava:13b', 'llava:34b', 'llava-phi', 'bakllava'];
+        llavaModels.forEach(model => {
+            modelCapabilitiesCache.delete(model.toLowerCase());
+            console.log(`[Fix] Cleared cache for ${model}`);
+        });
+        console.log('[Fix] LLaVA classification cache cleared. Refresh the page to see updated icons.');
+    }
+
     // Expose debug functions to global scope for console access
     window.ollamaBroDebug = {
         validateCapabilities: validateAndDebugCapabilities,
@@ -183,8 +193,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.log(`[Pattern Test] ${modelName}:`);
             console.log(`  Vision fallback: ${isVisionModelFallback(modelName)}`);
             console.log(`  Reasoning fallback: ${isReasoningModelFallback(modelName)}`);
+            console.log(`  isVisionModel() result: ${isVisionModel(modelName)}`);
+            console.log(`  isReasoningModel() result: ${isReasoningModel(modelName)}`);
             console.log(`  Current cache:`, modelCapabilitiesCache.get(modelName.toLowerCase()));
-        }
+            
+            // Check if it's in our hardcoded lists
+            const inVisionList = VISION_MODELS.some(vm => modelName.toLowerCase().includes(vm.toLowerCase()));
+            const inReasoningList = REASONING_MODELS.some(rm => modelName.toLowerCase().includes(rm.toLowerCase()));
+            console.log(`  In VISION_MODELS list: ${inVisionList}`);
+            console.log(`  In REASONING_MODELS list: ${inReasoningList}`);
+        },
+        fixLlava: fixLlavaClassification
     };
 
     function isVisionModel(modelName) {
@@ -224,6 +243,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     function isReasoningModel(modelName) {
         if (!modelName) return false;
         const normalizedModel = modelName.toLowerCase();
+        
+        // HARD EXCLUSION: LLaVA and other vision models are NOT reasoning models
+        if (normalizedModel.includes('llava') || normalizedModel.includes('bakllava') || 
+            normalizedModel.includes('moondream') || normalizedModel.includes('minicpm-v') ||
+            normalizedModel.includes('-vl') || normalizedModel.includes('vision')) {
+            return false;
+        }
         
         // Check cache first (handle both old and new cache structure)
         if (modelCapabilitiesCache.has(normalizedModel)) {
@@ -512,10 +538,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             return true;
         }
         
-        // 4. Check model size for reasoning capability (large models)
+        // 4. Check model size for reasoning capability (large models, but exclude vision-only models)
         if (modelInfo.details && modelInfo.details.parameter_size) {
             const paramSize = parseInt(modelInfo.details.parameter_size);
-            if (paramSize > 7000000000) { // 7B+ parameters
+            
+            // Don't classify vision models as reasoning models just because they're large
+            const isVisionOnly = name.includes('llava') || name.includes('vision') || 
+                                name.includes('minicpm-v') || name.includes('moondream') ||
+                                name.includes('bakllava') || name.includes('-vl');
+            
+            if (paramSize > 7000000000 && !isVisionOnly) { // 7B+ parameters, but not vision-only
                 console.log(`[Reasoning Detection] Large model size indicates reasoning: ${paramSize} parameters`);
                 return true;
             }
@@ -616,9 +648,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return true;
             }
             
-            // Strategy 5: Size-based reasoning (models with certain sizes are typically good at reasoning)
+            // Strategy 5: Size-based reasoning (only for non-vision models)
             const sizePatterns = [':70b', ':72b', ':34b', ':32b', ':14b'];
-            if (sizePatterns.some(size => normalizedModel.includes(size))) {
+            const isVisionOnly = normalizedModel.includes('llava') || normalizedModel.includes('vision') || 
+                                normalizedModel.includes('minicpm-v') || normalizedModel.includes('moondream') ||
+                                normalizedModel.includes('bakllava') || normalizedModel.includes('-vl');
+            
+            if (!isVisionOnly && sizePatterns.some(size => normalizedModel.includes(size))) {
                 return true;
             }
             
