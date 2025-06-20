@@ -651,6 +651,43 @@ header h1 {
     transform: scale(1.05);
 }
 
+/* Model capability icons */
+.model-capabilities {
+    display: inline-flex;
+    gap: var(--spacing-xs);
+    margin-left: var(--spacing-xs);
+    align-items: center;
+}
+
+.capability-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--theme-text-secondary);
+    opacity: 0.7;
+    transition: opacity var(--transition-duration) var(--transition-timing-function);
+}
+
+.capability-icon:hover {
+    opacity: 1;
+}
+
+.capability-icon.vision {
+    color: #10B981; /* Green for vision */
+}
+
+.capability-icon.reasoning {
+    color: #8B5CF6; /* Purple for reasoning */
+}
+
+.capability-icon svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+}
+
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
     width: 8px;

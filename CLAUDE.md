@@ -95,9 +95,36 @@ OllamaBro now supports vision models that can process images alongside text:
 
 ### Implementation Details
 - Images are base64-encoded for Ollama API compatibility
-- Vision model detection uses predefined model name patterns
+- Smart capability detection queries Ollama API for model metadata
 - Image data is stored in conversation history alongside text
 - Automatic cleanup of image preview URLs to prevent memory leaks
+
+## Model Capability Indicators
+
+Visual indicators help identify model capabilities using intelligent detection:
+
+### Vision Models 👁️
+- **Green eye icon** appears next to vision-capable models
+- Shown in model dropdown and chat header
+- Indicates support for image input (LLaVA, Llama 3.2-Vision, Gemma3, etc.)
+
+### Reasoning Models 🧠  
+- **Purple brain icon** appears next to reasoning-optimized models
+- Displayed alongside model names in dropdown and header
+- Indicates models optimized for complex thinking (Qwen2.5, CodeLlama, DeepSeek, etc.)
+
+### Smart Detection System
+- **API-based**: Queries Ollama `/api/show` endpoint for model metadata
+- **Template Analysis**: Examines model templates for vision/reasoning keywords
+- **Architecture Detection**: Checks for CLIP components (vision models)
+- **Intelligent Fallback**: Uses improved pattern matching with flexible name handling
+- **Caching**: Stores detected capabilities to avoid repeated API calls
+- **Auto-refresh**: Updates UI when capabilities are detected asynchronously
+
+### Detection Criteria
+- **Vision**: Looks for image/vision keywords, CLIP architecture, multimodal templates
+- **Reasoning**: Checks for think/reason/code keywords, large parameter counts (>7B), coding-specific templates
+- **Flexible Matching**: Handles model name variations and custom tags
 
 ## Development Notes
 

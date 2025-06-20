@@ -43,7 +43,7 @@ app.all('/proxy/*', (req, res) => {
     const originalPath = req.params[0];
     const ollamaPath = '/' + originalPath;
     const targetUrlString = OLLAMA_API_BASE_URL + ollamaPath;
-    const ALLOWED_OLLAMA_PATHS = ['/api/tags', '/api/chat', '/api/generate'];
+    const ALLOWED_OLLAMA_PATHS = ['/api/tags', '/api/chat', '/api/generate', '/api/show'];
 
     console.log(`Proxying request: ${req.method} ${req.originalUrl} -> ${targetUrlString}`);
 
