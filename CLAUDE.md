@@ -36,6 +36,19 @@ cd proxy_server
 npm install
 ```
 
+### Start with PM2 (Recommended for Development)
+```bash
+cd proxy_server
+pm2 start server.js --name ollama-proxy
+pm2 save
+```
+
+### Check Server Status
+```bash
+pm2 list
+pm2 logs ollama-proxy
+```
+
 ## Key Components
 
 ### Chrome Extension Structure
@@ -55,9 +68,42 @@ npm install
 - Storage key format: `ollamaBroChat_{sanitized_model_name}`
 - Each model maintains independent conversation history and active conversation state
 
+## Prerequisites
+
+Before development, ensure you have:
+- [Ollama](https://ollama.com/) running locally on port 11434
+- [Node.js](https://nodejs.org/) installed
+- Chrome browser for extension testing
+
+## Multimodal Support
+
+OllamaBro now supports vision models that can process images alongside text:
+
+### Supported Vision Models
+- LLaVA (all variants: 7b, 13b, 34b, v1.6)
+- Llama 3.2-Vision (11b, 90b)
+- BakLLaVA
+- Moondream
+
+### Image Features
+- **Automatic detection** - Image upload UI appears only for vision-capable models
+- **Multiple formats** - Supports JPEG, PNG, GIF, WebP up to 20MB
+- **Drag & drop** - Drop images anywhere in the chat interface
+- **Image preview** - Review images before sending with removal option
+- **Auto-compression** - Large images are automatically compressed
+- **Chat history** - Images are stored and displayed in conversation history
+
+### Implementation Details
+- Images are base64-encoded for Ollama API compatibility
+- Vision model detection uses predefined model name patterns
+- Image data is stored in conversation history alongside text
+- Automatic cleanup of image preview URLs to prevent memory leaks
+
 ## Development Notes
 
 - The proxy server runs on port 3000 and expects Ollama on port 11434
 - Extension uses Manifest V3 with host permissions for `http://localhost:3000/*`
 - Chat interface supports streaming responses and conversation management
 - All messages support `<think>` tag parsing for reasoning display
+- Image upload UI is dynamically shown/hidden based on model capabilities
+- Vision models receive images in the `images` array as base64 strings

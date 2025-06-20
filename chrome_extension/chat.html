@@ -518,6 +518,139 @@ header h1 {
     fill: currentColor;
 }
 
+/* Image Upload UI Styles */
+.input-icon-button {
+    background-color: var(--theme-button-bg);
+    border: 1px solid var(--theme-border-secondary);
+    color: var(--theme-icon-primary);
+    cursor: pointer;
+    padding: var(--spacing-sm);
+    border-radius: var(--border-radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    transition: background-color var(--transition-duration) var(--transition-timing-function),
+                color var(--transition-duration) var(--transition-timing-function),
+                border-color var(--transition-duration) var(--transition-timing-function);
+}
+
+.input-icon-button:hover {
+    background-color: var(--theme-button-hover-bg);
+    color: var(--theme-icon-hover);
+    border-color: var(--theme-border-secondary);
+}
+
+.input-icon-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.input-icon-button svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+#imagePreviewArea {
+    padding: var(--spacing-md) var(--spacing-xl);
+    background-color: var(--theme-bg-secondary);
+    border-top: 1px solid var(--theme-border-primary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.image-preview {
+    position: relative;
+    display: inline-block;
+    border-radius: var(--border-radius-md);
+    overflow: hidden;
+    border: 2px solid var(--theme-border-secondary);
+    background-color: var(--theme-bg-primary);
+}
+
+.image-preview img {
+    width: 80px;
+    height: 80px;
+    object-fit: cover;
+    display: block;
+}
+
+.image-preview .remove-image {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background-color: rgba(220, 38, 38, 0.9);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+    transition: background-color var(--transition-duration) var(--transition-timing-function);
+}
+
+.image-preview .remove-image:hover {
+    background-color: rgba(185, 28, 28, 0.9);
+}
+
+/* Drag and drop overlay */
+#dragDropOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(32, 33, 35, 0.9);
+    border: 3px dashed var(--theme-border-input-focus);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    pointer-events: none;
+}
+
+#dragDropOverlay.active {
+    display: flex;
+}
+
+#dragDropOverlay .drop-message {
+    color: var(--theme-text-primary);
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    text-align: center;
+}
+
+/* Message images styling */
+.message-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+    margin: var(--spacing-sm) 0;
+}
+
+.message-image {
+    max-width: 200px;
+    max-height: 200px;
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--theme-border-secondary);
+    cursor: pointer;
+    transition: transform var(--transition-duration) var(--transition-timing-function);
+}
+
+.message-image:hover {
+    transform: scale(1.05);
+}
+
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
     width: 8px;
@@ -615,6 +748,14 @@ header h1 {
     </style>
 </head>
 <body>
+    <div id="dragDropOverlay">
+        <div class="drop-message">
+            <div>Drop images here to upload</div>
+            <div style="font-size: var(--font-size-sm); margin-top: var(--spacing-sm); opacity: 0.7;">
+                Supports JPEG, PNG, GIF, WebP
+            </div>
+        </div>
+    </div>
     <div id="appContainer">
         <div id="conversationSidebar">
             <div id="sidebarHeader">
@@ -649,7 +790,17 @@ header h1 {
                 <!-- Messages will appear here -->
             </div>
             <div id="loadingIndicator">Waiting for model response...</div>
+            <div id="imagePreviewArea" style="display: none;">
+                <!-- Images will be shown here before sending -->
+            </div>
             <div id="inputArea">
+                <input type="file" id="imageInput" accept="image/*" multiple style="display: none;">
+                <button id="imageButton" class="input-icon-button" title="Add image (vision models only)" style="display: none;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
+                        <path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/>
+                    </svg>
+                </button>
                 <input type="text" id="messageInput" placeholder="Type your message...">
                 <button id="sendButton">Send</button>
             </div>

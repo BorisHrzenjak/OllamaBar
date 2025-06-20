@@ -16,12 +16,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     const newChatButton = document.getElementById('newChatButton');
     const collapseSidebarButton = document.getElementById('collapseSidebarButton');
     const conversationList = document.getElementById('conversationList');
+    
+    // Image upload elements
+    const imageButton = document.getElementById('imageButton');
+    const imageInput = document.getElementById('imageInput');
+    const imagePreviewArea = document.getElementById('imagePreviewArea');
+    const dragDropOverlay = document.getElementById('dragDropOverlay');
 
     let currentModelName = '';
     const storageKeyPrefix = 'ollamaBroChat_';
     const sidebarStateKey = 'ollamaBroSidebarState';
     let availableModels = [];
     let currentAbortController = null; // Track current request for aborting
+    let selectedImages = []; // Store selected images for sending
+
+    // Vision models that support image input
+    const VISION_MODELS = [
+        'llava', 'llava:7b', 'llava:13b', 'llava:34b',
+        'llava:7b-v1.6', 'llava:13b-v1.6', 'llava:34b-v1.6',
+        'llama3.2-vision', 'llama3.2-vision:11b', 'llama3.2-vision:90b',
+        'bakllava', 'bakllava:7b',
+        'moondream', 'moondream:1.8b'
+    ];
+
+    function isVisionModel(modelName) {
+        if (!modelName) return false;
+        const normalizedModel = modelName.toLowerCase();
+        return VISION_MODELS.some(visionModel => 
+            normalizedModel.includes(visionModel.toLowerCase()) ||
+            normalizedModel.startsWith(visionModel.toLowerCase())
+        );
+    }
+
+    function toggleImageUploadUI(show) {
+        if (imageButton) {
+            imageButton.style.display = show ? 'flex' : 'none';
+        }
+    }
 
     function getModelStorageKey(model) {
         const key = `${storageKeyPrefix}${model.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
@@ -186,7 +217,162 @@ document.addEventListener('DOMContentLoaded', async () => {
         return fragment;
     }
 
-    function addMessageToChatUI(sender, initialText, messageClass, modelDataForFilename) {
+    // Image processing functions
+    function validateImageFile(file) {
+        const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+        const maxSize = 20 * 1024 * 1024; // 20MB limit
+        
+        if (!allowedTypes.includes(file.type)) {
+            throw new Error(`Unsupported file type: ${file.type}. Supported types: JPEG, PNG, GIF, WebP`);
+        }
+        
+        if (file.size > maxSize) {
+            throw new Error(`File too large: ${(file.size / (1024 * 1024)).toFixed(1)}MB. Maximum size: 20MB`);
+        }
+        
+        return true;
+    }
+
+    async function fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                // Remove the data:image/...;base64, prefix
+                const base64String = reader.result.split(',')[1];
+                resolve(base64String);
+            };
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function compressImage(file, maxWidth = 1024, maxHeight = 1024, quality = 0.8) {
+        return new Promise((resolve, reject) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                // Calculate new dimensions while maintaining aspect ratio
+                let { width, height } = img;
+                if (width > maxWidth || height > maxHeight) {
+                    const ratio = Math.min(maxWidth / width, maxHeight / height);
+                    width *= ratio;
+                    height *= ratio;
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                
+                // Draw and compress
+                ctx.drawImage(img, 0, 0, width, height);
+                canvas.toBlob(resolve, file.type, quality);
+            };
+            
+            img.onerror = () => reject(new Error('Failed to load image for compression'));
+            img.src = URL.createObjectURL(file);
+        });
+    }
+
+    async function processImageForUpload(file) {
+        try {
+            validateImageFile(file);
+            
+            // Compress if the file is large
+            let processedFile = file;
+            if (file.size > 2 * 1024 * 1024) { // Compress files larger than 2MB
+                processedFile = await compressImage(file);
+            }
+            
+            const base64 = await fileToBase64(processedFile);
+            const previewUrl = URL.createObjectURL(processedFile);
+            
+            return {
+                base64,
+                previewUrl,
+                fileName: file.name,
+                fileSize: processedFile.size,
+                fileType: file.type
+            };
+        } catch (error) {
+            console.error('Error processing image:', error);
+            throw error;
+        }
+    }
+
+    function addImageToPreview(imageData, index) {
+        const previewDiv = document.createElement('div');
+        previewDiv.className = 'image-preview';
+        previewDiv.dataset.index = index;
+        
+        const img = document.createElement('img');
+        img.src = imageData.previewUrl;
+        img.alt = imageData.fileName;
+        
+        const removeButton = document.createElement('button');
+        removeButton.className = 'remove-image';
+        removeButton.innerHTML = '×';
+        removeButton.title = 'Remove image';
+        removeButton.addEventListener('click', () => removeImageFromPreview(index));
+        
+        previewDiv.appendChild(img);
+        previewDiv.appendChild(removeButton);
+        imagePreviewArea.appendChild(previewDiv);
+        
+        updatePreviewAreaVisibility();
+    }
+
+    function removeImageFromPreview(index) {
+        // Clean up the preview URL to prevent memory leaks
+        if (selectedImages[index] && selectedImages[index].previewUrl) {
+            URL.revokeObjectURL(selectedImages[index].previewUrl);
+        }
+        
+        selectedImages.splice(index, 1);
+        refreshImagePreview();
+    }
+
+    function refreshImagePreview() {
+        imagePreviewArea.innerHTML = '';
+        selectedImages.forEach((imageData, index) => {
+            addImageToPreview(imageData, index);
+        });
+        updatePreviewAreaVisibility();
+    }
+
+    function updatePreviewAreaVisibility() {
+        if (selectedImages.length > 0) {
+            imagePreviewArea.style.display = 'flex';
+        } else {
+            imagePreviewArea.style.display = 'none';
+        }
+    }
+
+    function clearSelectedImages() {
+        // Clean up preview URLs
+        selectedImages.forEach(imageData => {
+            if (imageData.previewUrl) {
+                URL.revokeObjectURL(imageData.previewUrl);
+            }
+        });
+        selectedImages = [];
+        imagePreviewArea.innerHTML = '';
+        updatePreviewAreaVisibility();
+    }
+
+    async function handleImageFiles(files) {
+        for (const file of files) {
+            try {
+                const imageData = await processImageForUpload(file);
+                selectedImages.push(imageData);
+                addImageToPreview(imageData, selectedImages.length - 1);
+            } catch (error) {
+                alert(`Error processing image "${file.name}": ${error.message}`);
+            }
+        }
+    }
+
+    function addMessageToChatUI(sender, initialText, messageClass, modelDataForFilename, images = null) {
         const messageDiv = document.createElement('div');
         messageDiv.classList.add('message', messageClass);
 
@@ -195,6 +381,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         senderDiv.classList.add('message-sender');
         senderDiv.textContent = sender;
         messageDiv.appendChild(senderDiv);
+
+        // Add images if present (for user messages)
+        if (images && images.length > 0) {
+            const imagesContainer = document.createElement('div');
+            imagesContainer.classList.add('message-images');
+            images.forEach(imageData => {
+                const img = document.createElement('img');
+                img.src = `data:${imageData.fileType};base64,${imageData.base64}`;
+                img.alt = imageData.fileName || 'Uploaded image';
+                img.classList.add('message-image');
+                imagesContainer.appendChild(img);
+            });
+            messageDiv.appendChild(imagesContainer);
+        }
 
         // Message text content wrapper
         const textContentDiv = document.createElement('div');
@@ -347,7 +547,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         chatContainer.innerHTML = ''; // Clear current messages
         if (modelData.conversations[conversationId] && modelData.conversations[conversationId].messages) {
             modelData.conversations[conversationId].messages.forEach(msg => {
-                addMessageToChatUI(msg.role === 'user' ? 'You' : currentModelName, msg.content, msg.role === 'user' ? 'user-message' : 'bot-message', modelData);
+                addMessageToChatUI(
+                    msg.role === 'user' ? 'You' : currentModelName, 
+                    msg.content, 
+                    msg.role === 'user' ? 'user-message' : 'bot-message', 
+                    modelData,
+                    msg.images // Pass images if present
+                );
             });
         } else {
              addMessageToChatUI(currentModelName, `Hello! Start a new conversation with ${decodeURIComponent(currentModelName)}.`, 'bot-message', modelData);
@@ -476,14 +682,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         const activeConvId = modelData.activeConversationId;
         const currentConversation = modelData.conversations[activeConvId];
 
+        // Prepare user message with images if any
+        const userMessage = { role: 'user', content: prompt };
+        if (selectedImages.length > 0) {
+            userMessage.images = selectedImages.map(img => ({
+                base64: img.base64,
+                fileName: img.fileName,
+                fileType: img.fileType
+            }));
+        }
+
         // Add user message to UI and save state
-        addMessageToChatUI('You', prompt, 'user-message', modelData);
-        currentConversation.messages.push({ role: 'user', content: prompt });
+        addMessageToChatUI('You', prompt, 'user-message', modelData, userMessage.images);
+        currentConversation.messages.push(userMessage);
         currentConversation.summary = getConversationSummary(currentConversation.messages);
         currentConversation.lastMessageTime = Date.now();
         // Do not save yet, save after bot response or error
 
         messageInput.value = '';
+        clearSelectedImages(); // Clear images after sending
         // Only show loading indicator when actually sending a request
         if (loadingIndicator) {
             loadingIndicator.style.display = 'block';
@@ -505,16 +722,38 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         try {
             console.log(`Sending to /proxy/api/chat with model: ${currentModelName} for streaming.`);
+            
+            // Prepare messages for API - convert image data for Ollama format
+            const apiMessages = currentConversation.messages
+                .filter(m => m.role === 'user' || m.role === 'assistant')
+                .map(message => {
+                    const apiMessage = {
+                        role: message.role,
+                        content: message.content
+                    };
+                    
+                    // Add images if present (only for user messages)
+                    if (message.role === 'user' && message.images && message.images.length > 0) {
+                        apiMessage.images = message.images.map(img => img.base64);
+                    }
+                    
+                    return apiMessage;
+                });
+
+            const requestBody = {
+                model: currentModelName,
+                messages: apiMessages,
+                stream: true
+            };
+
+            console.log('Request body for Ollama:', JSON.stringify(requestBody, null, 2));
+
             const response = await fetch('http://localhost:3000/proxy/api/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    model: currentModelName,
-                    messages: currentConversation.messages.filter(m => m.role === 'user' || m.role === 'assistant'), // Send only user/assistant messages
-                    stream: true
-                }),
+                body: JSON.stringify(requestBody),
                 signal: currentAbortController.signal // Add abort signal
             });
 
@@ -637,6 +876,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentModelName = newModelName;
         modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(currentModelName)}`;
         
+        // Clear any selected images when switching models
+        clearSelectedImages();
+        
+        // Show/hide image upload UI based on model capabilities
+        toggleImageUploadUI(isVisionModel(currentModelName));
+        
         let modelData = await loadModelChatState(currentModelName);
         if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
             await startNewConversation(currentModelName); // Start new if no active or no convs
@@ -723,6 +968,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('[OllamaBro] init - Initializing chat for model from URL:', currentModelName);
         modelNameDisplay.textContent = `Chatting with: ${decodeURIComponent(currentModelName)}`;
 
+        // Show/hide image upload UI based on model capabilities
+        toggleImageUploadUI(isVisionModel(currentModelName));
+
         let modelData = await loadModelChatState(currentModelName);
         if (!modelData.activeConversationId || !modelData.conversations[modelData.activeConversationId]) {
             await startNewConversation(currentModelName);
@@ -753,6 +1001,48 @@ document.addEventListener('DOMContentLoaded', async () => {
     clearChatButton.addEventListener('click', () => clearAllConversationsForModel(currentModelName));
     
     newChatButton.addEventListener('click', () => startNewConversation(currentModelName));
+
+    // Image upload event listeners
+    if (imageButton && imageInput) {
+        imageButton.addEventListener('click', () => {
+            imageInput.click();
+        });
+
+        imageInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                handleImageFiles(Array.from(e.target.files));
+                e.target.value = ''; // Clear the input so the same file can be selected again
+            }
+        });
+    }
+
+    // Drag and drop functionality
+    document.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (isVisionModel(currentModelName)) {
+            dragDropOverlay.classList.add('active');
+        }
+    });
+
+    document.addEventListener('dragleave', (e) => {
+        if (!e.relatedTarget || !document.contains(e.relatedTarget)) {
+            dragDropOverlay.classList.remove('active');
+        }
+    });
+
+    document.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragDropOverlay.classList.remove('active');
+        
+        if (isVisionModel(currentModelName) && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const imageFiles = Array.from(e.dataTransfer.files).filter(file => 
+                file.type.startsWith('image/')
+            );
+            if (imageFiles.length > 0) {
+                handleImageFiles(imageFiles);
+            }
+        }
+    });
 
     modelSwitcherButton.addEventListener('click', async (e) => {
         e.stopPropagation();
